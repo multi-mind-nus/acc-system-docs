@@ -167,9 +167,11 @@ F1 与 B1 是同一个部署阶段的两部分，可以并行开发；F1 可先�
 
 ### 6.2 交付内容
 
-- `/app/admin/users`：员工列表、邀请、启用/禁用；
-- `/app/clients`：客户列表、搜索、分页和状态；
-- `/app/clients/:id`：基本信息、业务特征、银行账户、联系人和会计分配；
+- `/staff/admin/users`：员工列表、邀请、启用/禁用；
+- `/staff/clients`：客户列表、搜索、分页和状态；
+- `/staff/clients/:id`：基本信息、业务特征、银行账户、联系人和会计分配；
+- `/client/contacts`：客户管理员维护本客户联系人；
+- `/invitations/accept`：受邀人设置密码并接受邀请；
 - CLIENT_ADMIN 可见的联系人管理入口；
 - 邀请状态、过期、撤销和重新邀请反馈；
 - 固定角色选择，不实现自定义 RBAC 编辑器；
@@ -191,6 +193,13 @@ F1 与 B1 是同一个部署阶段的两部分，可以并行开发；F1 可先�
 ### 6.4 阶段完成标志
 
 管理员无需数据库或 SQLAdmin 即可完成首版账户、客户和负责人维护。
+
+### 6.5 本地验收候选（2026-09-17，待用户验收）
+
+- 入口：`http://localhost`，使用现有本地管理员账户；不要重置其密码。本轮未更新 Lightsail，也未提交代码。
+- 可用 `F3 Acceptance Demo` 样例客户检查客户详情、银行账户和团队页；员工与客户列表从顶部导航进入。邀请只生成一次性链接，需手动分享，不发送 Email/飞书。
+- 按 F3-A1～A7 验收；受邀角色和客户端联系人需使用各自账号测试，不能用事务所管理员账号代替。
+- 自动检查：前端 `pnpm lint`、`pnpm build`、Vitest **36 passed**；后端 `uv run pytest -q` **25 passed**、`uv run alembic check` 无模型漂移。本地 Compose 的前后端、Nginx、PostgreSQL、Redis 与 worker 均已启动，`/api/v1/health/ready` 返回 PostgreSQL/Redis 正常。
 
 ## 7. F4：会计端收集请求
 
