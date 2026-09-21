@@ -132,7 +132,7 @@ stateDiagram-v2
 4. 写入不可变的 `workflow_events`；
 5. 必要时写入 `notification_outbox`。
 
-`FIRM_ADMIN` 可在尚未关闭时把 `READY_FOR_BOOKKEEPING` 撤回到 `IN_REVIEW`，且必须填写原因；`CLOSED` 是终态，关闭后的更正通过新建收集请求处理。取消同样必须填写原因，避免审核中的请求无法终止或无从追溯。
+`FIRM_ADMIN` 可在尚未关闭时把 `READY_FOR_BOOKKEEPING` 撤回到 `IN_REVIEW`，且必须填写原因；`CLOSED` 是终态，关闭后的更正通过新建收集请求处理。取消同样必须填写原因，避免审核中的请求无法终止或无从追溯。取消记录不会删除，但不再占用“客户 + 期间”的唯一名额，因此可以为相同期间重新创建请求；任意时刻仍只允许一个未取消请求。
 
 ### 6.2 资料要求
 

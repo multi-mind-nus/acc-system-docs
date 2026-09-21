@@ -194,6 +194,7 @@ uv.lock
 - `collection_requests`、`requirements`、`workflow_events`、`idempotency_records` 表；
 - 请求与 requirements 在同一事务创建；
 - `DRAFT → OPEN` 发布流程，及 DRAFT/OPEN/IN_REVIEW/CHANGES_REQUESTED 的取消规则；
+- 同一客户、同一期间只允许一个未取消请求；取消记录保留，且可为该期间重新创建请求；
 - 请求列表分页与客户、期间、状态、负责人、截止日筛选；
 - 复制上月请求时只复制仍适用的要求，不复制文档、审核结论和事件；
 - 已发布要求不物理删除；审核阶段新增项标记 `FOLLOW_UP`；
@@ -213,6 +214,7 @@ uv.lock
 | B3-A6 | 两个客户端基于同一 version 修改请求 | 第一个成功并递增 version；第二个收到 `409` 和最新资源 |
 | B3-A7 | 复制上月请求到新期间 | requirements 被复制，文档、审核决定和历史事件未复制；同客户同期间不能重复创建 |
 | B3-A8 | 按客户、期间、状态和截止日期组合筛选列表 | 只返回当前事务所且符合条件的数据，分页总数正确 |
+| B3-A9 | 取消请求后，为同一客户、同一期间重新创建请求 | 取消记录继续保留；新请求创建成功；新请求未取消前再次创建返回 `COLLECTION_EXISTS` |
 
 ### 6.4 阶段完成标志
 
@@ -234,6 +236,7 @@ uv.lock
 
 - `submissions`、`documents`、`requirement_documents` 表及文件处理租约字段；
 - portal 请求列表/详情，仅返回当前客户可见字段；
+- 文件分类接口：首版根据文件名返回 `REQUIREMENT/OTHER/INVALID`、requirement id 和置信度，保持固定 schema 以便后续替换为真实 AI；
 - `multipart/form-data` 分块上传、大小限制、扩展名/MIME/magic bytes 校验、SHA-256；
 - `.part → QUARANTINED → AVAILABLE/FAILED/EXCLUDED` 生命周期；
 - Worker 使用 `FOR UPDATE SKIP LOCKED`、`locked_by`、`locked_until`、attempts 和退避领取扫描任务；
@@ -257,6 +260,7 @@ uv.lock
 | B4-A6 | 同一客户再次上传相同 SHA-256 文件并关联另一要求 | 系统提示重复并允许关联已有证据；不同事务所绝不复用文件 |
 | B4-A7 | 客户在草稿轮次上传多个文件、逻辑排除其中一个并提交 | 只提交有效文档；submission 变为 `SUBMITTED`，原轮次不再可编辑 |
 | B4-A8 | 会计按历史期间和 document type 搜索 | 可找到当前客户历史资料，不会把历史文件复制成新文件，也不会返回其他客户资料 |
+| B4-A9 | 提交多个文件名请求自动分类 | 返回与输入顺序一致的分类、requirement id 和置信度；不支持的类型或空文件返回 `INVALID`，其他未命中文件返回 `OTHER` |
 
 ### 7.4 阶段完成标志
 
