@@ -11,7 +11,7 @@ MVP 必须完成：
 - 客户端上传、查看问题、补交和再次提交；
 - 单项资料审核、退回、豁免、整单批准和完整审计轨迹；
 - Docker Compose 单机部署，以及前后端镜像通过 GitHub Actions 推送 Amazon ECR；
-- 为 AI 文档理解/会计推理保留稳定接口，但 AI 不能直接修改业务状态。
+- 接入 `acc-system-agent` 完成上传分类和提交后审核；Agent 不直接修改业务状态，后端验证其输出后可按请求配置自动执行单项审核。
 
 首版不做流程设计器、复杂模板系统、WebSocket、微服务拆分和对象存储抽象。单机容量或文件备份成为瓶颈时，再把文件迁移到 S3。
 
@@ -21,11 +21,11 @@ MVP 必须完成：
 
 1. 错主体、错期间、缺文件都不能满足资料要求；错误文件保留历史，不能物理删除。
 2. 一份文件可能支持多个要求，一个要求也可能由多份文件共同支持，因此资料要求和文件是多对多关系。
-3. 必须能搜索客户当前及历史期间的资料，避免重复向客户索取系统已有文件。
+3. 审核决定必须记录明确的 evidence 和 `SUPPORTS/CONTRADICTS/REFERENCE` 关系；AI 或人工都不得默认把本轮全部文件当成相同证据。
 4. 客户可多轮补交；每轮提交、审核意见和状态变化都要保留。
 5. 只有全部必填要求均为 `SATISFIED` 或 `WAIVED`，整单才能进入 `READY_FOR_BOOKKEEPING`。
 6. F05 中“本次收款核对完成”不等于“全部款项已收齐”。整单完成状态必须描述核对范围，不能推导不存在的业务结论。
-7. AI 输出是建议。最终状态迁移、权限校验和完成条件由后端执行。
+7. AI 输出必须由后端校验权限、证据归属、金额和置信度；单项状态可按请求阈值自动变更，`WAIVED` 和整单批准始终由人工执行。
 
 ## 3. 总体架构
 
@@ -39,8 +39,10 @@ flowchart LR
     API --> Files[(资料持久卷)]
     Worker[Backend Worker] --> PG
     Worker --> Files
-    Worker -->|可选 HTTP| AI[AI Service]
-    Worker -->|可选| Notify[Email / 飞书]
+    Worker -->|内网 HTTP| Agent[acc-system-agent]
+    Agent -->|只读挂载| Files
+    Agent -->|HTTPS| Model[远端已训练模型 API]
+    Worker --> Outbox[(Notification Outbox)]
 ```
 
 核心原则：
@@ -50,7 +52,8 @@ flowchart LR
 - Redis 只保存可重建数据：JWT refresh session/revocation 和限流计数，不保存审批状态；
 - Worker 与 API 使用同一个后端镜像，仅启动命令不同；
 - 浏览器只能访问 Nginx，PostgreSQL、Redis、文件卷和内部 Worker 不暴露宿主机端口；
-- AI 服务故障时只影响自动建议，人工审核仍可继续。
+- `acc-system-agent` 是独立镜像，不连接 PostgreSQL/Redis，不拥有业务状态机；
+- Agent 或远端模型故障时只影响自动分析，上传、人工审核和批准仍可继续。
 
 ## 4. 仓库职责
 
@@ -77,13 +80,15 @@ acc-system-backend/
   .github/workflows/build-image.yml
 
 acc-system-agent/
-  AI 服务实现；只需遵守第 10 节接口
+  本地 AI Harness；读取只读资料卷、调用远端模型并规范化输出
+  Dockerfile
+  .github/workflows/build-image.yml
 
 acc-system-docs/
   业务规则、接口说明、部署说明和测试样例
 ```
 
-`deploy/` 放在后端仓库，因为数据库迁移、API、Worker 和 Compose 发布需要一起变更。Nginx 配置变化时单独构建 `acc-system-nginx` 镜像。
+`deploy/` 放在后端仓库，因为数据库迁移、API、Worker 和 Compose 发布需要一起变更。Nginx 配置变化时单独构建 `acc-system-nginx` 镜像；Agent 由 `acc-system-agent` 自行构建并推送 ECR。
 
 ## 5. 角色与数据权限
 
@@ -178,20 +183,23 @@ AVAILABLE   -> EXCLUDED
 
 | 表 | 关键字段 |
 | --- | --- |
-| `collection_requests` | `id`, `firm_id`, `client_id`, `period`, `due_at`, `status`, `scope_note`, `version`, `created_by`, `submitted_at`, `approved_by`, `approved_at` |
-| `requirements` | `id`, `firm_id`, `request_id`, `origin`, `type`, `title`, `required`, `criteria jsonb`, `status`, `issue_code`, `client_message`, `internal_note`, `version`, `reviewed_by`, `reviewed_at` |
+| `collection_requests` | `id`, `firm_id`, `client_id`, `period`, `due_at`, `status`, `scope_note`, `ai_mode`, `ai_satisfy_threshold`, `ai_request_action_threshold`, `version`, `created_by`, `submitted_at`, `approved_by`, `approved_at` |
+| `requirements` | `id`, `firm_id`, `request_id`, `origin`, `type`, `analysis_type`, `title`, `required`, `criteria jsonb`, `status`, `issue_code`, `client_message`, `internal_note`, `version`, `reviewed_by`, `reviewed_at` |
 | `submissions` | `id`, `firm_id`, `request_id`, `round_no`, `status`, `note`, `submitted_by`, `submitted_at` |
 | `documents` | `id`, `firm_id`, `client_id`, `request_id`, `submission_id`, `storage_key`, `original_name`, `mime_type`, `size_bytes`, `sha256`, `document_type`, `entity_name`, `period`, `status`, `scan_error`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `extracted_data jsonb`, `uploaded_by`, `created_at` |
 | `requirement_documents` | `firm_id`, `requirement_id`, `document_id`, `relation` |
-| `review_decisions` | `id`, `firm_id`, `requirement_id`, `submission_id`, `decision`, `issue_code`, `client_message`, `internal_note`, `created_by`, `created_at` |
-| `workflow_events` | `id`, `firm_id`, `request_id`, `actor_id`, `event_type`, `payload jsonb`, `created_at` |
+| `review_decisions` | `id`, `firm_id`, `requirement_id`, `submission_id`, `decision`, `source`, `ai_run_id`, `issue_code`, `client_message`, `internal_note`, `created_by`, `created_at` |
+| `workflow_events` | `id`, `firm_id`, `request_id`, `actor_type`, `actor_id`, `event_type`, `payload jsonb`, `created_at` |
 
 说明：
 
 - 一次客户补交对应一个 `submission`。每个请求同一时间最多一个 `DRAFT` submission；点击提交后变为 `SUBMITTED`，退回后下一轮创建新 submission。
 - `requirements.origin` 区分创建请求时的 `INITIAL` 项和审核中新增的 `FOLLOW_UP` 项。已发布要求不删除，只能满足或豁免。
 - `requirement_documents.relation` 使用 `SUPPORTS`、`CONTRADICTS`、`REFERENCE`，支持多发票对一笔付款、一张发票对多笔付款和报销证据链。
-- 历史检索使用 `documents.client_id + period + document_type` 索引，不复制历史文件到本月请求。
+- `analysis_type` 固定为 `DOCUMENT_REQUIREMENT_VALIDATION | BANK_TRANSACTION_RECONCILIATION`，仅供 Backend/Agent 内部使用，不让会计选择。创建/新增/修改/复制时，银行对账单默认对账提示，其他资料默认要求校验；最终检查由提交后的 REVIEW 根据实际资料安排，不是互斥的两种业务流程。交易日期、描述、带符号金额和币种应从本次提交的对账单中提取，而不是在创建请求时手填。已有 `criteria.target_transaction` 保留历史，不作为新轮次的默认交易事实；复制请求不携带旧交易目标。
+- 新请求默认 `AUTO_REVIEW` 且双阈值为 `0.980`；迁移前已有请求统一设为 `SUGGEST`，AI 策略只能在 `DRAFT` 修改。
+- 上传分类确认后只写入 `document_type`；`entity_name`、`period` 和完整 `extracted_data` 只在客户提交后的 `REVIEW` 成功时写入。
+- `review_decisions.source` 固定为 `HUMAN | AI`；`workflow_events.actor_type` 固定为 `USER | SYSTEM`，SYSTEM 事件允许 `actor_id` 为空。
 - `review_decisions` 和 `workflow_events` 只追加，不更新历史；`requirements.status` 保存当前快照，方便查询。
 - 对客户公开的 `client_message` 与仅事务所可见的 `internal_note` 分列保存；portal 使用独立响应模型，不能返回内部备注和 AI 原始输出。
 
@@ -199,7 +207,7 @@ AVAILABLE   -> EXCLUDED
 
 | 表 | 关键字段 |
 | --- | --- |
-| `ai_runs` | `id`, `firm_id`, `request_id`, `submission_id`, `status`, `input_snapshot jsonb`, `output jsonb`, `error`, `requested_by`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `created_at`, `finished_at` |
+| `ai_runs` | `id`, `firm_id`, `request_id`, `submission_id`, `purpose`, `status`, `model_version`, `input_snapshot jsonb`, `output jsonb`, `error`, `requested_by`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `created_at`, `finished_at` |
 | `notification_outbox` | `id`, `firm_id`, `request_id`, `channel`, `recipient`, `template`, `payload jsonb`, `dedupe_key`, `status`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `last_error`, `sent_at` |
 | `idempotency_records` | `id`, `firm_id`, `actor_id`, `key`, `method`, `path`, `request_hash`, `status`, `status_code`, `response_body jsonb`, `expires_at`, `created_at` |
 
@@ -207,14 +215,15 @@ AVAILABLE   -> EXCLUDED
 
 - `users.email` 使用大小写不敏感唯一索引；
 - `clients (firm_id, code)` 唯一；
-- `collection_requests (firm_id, client_id, period)` 唯一，MVP 每客户每月一个请求；
+- `collection_requests (firm_id, client_id, period)` 对未取消记录使用部分唯一索引；取消记录保留且允许同期间重建；
 - `submissions (request_id, round_no)` 唯一，并用部分唯一索引限制一个草稿轮次；
 - 租户子表保留 `firm_id`，通过 `(firm_id, client_id)` 等复合外键阻止跨事务所关联，而不只依赖应用代码；
 - 被复合外键引用的父表建立 `(firm_id, id)` 唯一约束，使租户一致性真正由 PostgreSQL 校验；
 - `collection_requests.version`、`requirements.version` 非空并由 SQLAlchemy `version_id_col` 管理；
 - `idempotency_records (firm_id, actor_id, key)` 唯一；同一 key 携带不同请求哈希时拒绝复用；
 - `notification_outbox (firm_id, dedupe_key)` 唯一，`dedupe_key` 非空且由事件类型、请求和提醒周期稳定生成；
-- 为请求看板 `(firm_id, status, due_at)`、历史资料 `(firm_id, client_id, period, document_type)`、任务领取 `(status, next_attempt_at)` 和事件查询 `(request_id, created_at)` 建索引；
+- 同一 `ai_run + requirement` 最多产生一条 AI 自动审核决定；
+- 为请求看板 `(firm_id, status, due_at)`、客户资料 `(firm_id, client_id, period, document_type, created_at)`、任务领取 `(status, next_attempt_at)` 和事件查询 `(request_id, created_at)` 建索引；
 - 金额使用 `numeric(20, 4)`，币种使用 ISO 4217 三字符代码；
 - 时间戳使用 `timestamptz` 并存 UTC，月度期间使用当月第一天的 `date`；
 - 业务状态使用文本列加 `CHECK`，避免 PostgreSQL enum 带来的迁移阻力。
@@ -242,9 +251,7 @@ app/
     documents.py
     reviews.py
   integrations/
-    ai.py
-    email.py
-    feishu.py
+    agent.py
 ```
 
 `workflow.py` 集中保存状态迁移和完成条件；路由只做输入校验、授权和调用。首版不增加 repository/interface/factory 层。
@@ -308,7 +315,7 @@ MVP 将文件保存到后端持久卷 `/data/documents`，`storage_key` 使用�
 - `workflow_events`、当前状态和 outbox 必须在同一事务提交；审计事件没有更新/删除接口；
 - 通知采用 transactional outbox，与业务状态在同一事务写入，避免状态已变但消息丢失。
 
-Worker 领取规则：按 `next_attempt_at, id` 排序，在短事务中以 `FOR UPDATE SKIP LOCKED` 取得任务，写入 `PROCESSING + locked_by + locked_until` 后立即提交；邮件、飞书和 AI HTTP 调用在事务外执行，结果再用短事务回写。进程崩溃后，过期租约可被其他 Worker 重领；超过最大次数进入 `FAILED` 并告警。不要在发送邮件或等待 AI 时持有数据库行锁。
+Worker 领取规则：按 `next_attempt_at, id` 排序，在短事务中以 `FOR UPDATE SKIP LOCKED` 取得任务，写入 `PROCESSING + locked_by + locked_until` 后立即提交；Agent HTTP 和未来通知渠道调用在事务外执行，结果再用短事务回写。进程崩溃后，过期租约可被其他 Worker 重领；超过最大次数进入 `FAILED` 并告警。不要在等待外部服务时持有数据库行锁。
 
 ## 9. API 设计
 
@@ -367,8 +374,13 @@ POST /collection-requests/{request_id}/copy?period=2026-09
 ```text
 GET    /portal/collection-requests
 GET    /portal/collection-requests/{request_id}
+POST   /portal/collection-requests/{request_id}/classification-runs
 POST   /portal/collection-requests/{request_id}/documents
 DELETE /portal/documents/{document_id}             # 仅草稿且未提交；逻辑排除
+POST   /portal/ai-runs/{run_id}/start
+GET    /portal/ai-runs/{run_id}
+POST   /portal/ai-runs/{run_id}/confirm
+POST   /portal/ai-runs/{run_id}/cancel
 POST   /portal/collection-requests/{request_id}/submit
 
 GET    /documents/{document_id}
@@ -376,7 +388,7 @@ GET    /documents/{document_id}/download
 GET    /documents/{document_id}/preview
 ```
 
-文件上传使用标准 `multipart/form-data`，受理后返回 `202 Accepted`；前端轮询文档详情直到 `AVAILABLE` 或 `FAILED`。全部 HTTP 请求统一经过 Axios 实例；上传进度使用 Axios 的 `onUploadProgress`，不再维护第二套 `fetch/XMLHttpRequest` 请求逻辑。
+文件上传使用标准 `multipart/form-data`，受理后返回 `202 Accepted`；前端轮询文档详情直到 `AVAILABLE` 或 `FAILED`。批量分类的文件在确认前不进入正式清单；`OTHER` 进入其他资料，`INVALID` 和取消的文件逻辑排除。全部 HTTP 请求统一经过 Axios 实例，上传进度使用 `onUploadProgress`。
 
 ### 9.4 审核
 
@@ -388,74 +400,110 @@ POST /collection-requests/{request_id}/reopen
 POST /collection-requests/{request_id}/close
 POST /collection-requests/{request_id}/ai-runs
 GET  /ai-runs/{run_id}
+POST /ai-runs/{run_id}/retry
 ```
 
-单项审核 `decision` 为 `SATISFY`、`REQUEST_ACTION` 或 `WAIVE`。`REQUEST_ACTION` 必须有 `issue_code` 和面向客户的明确说明；`WAIVE` 必须有原因。整单批准接口再次在服务端检查所有必填项，不能信任前端按钮状态。所有修改状态的请求携带当前 `version`；发布、提交、退回、批准、撤回批准和关闭同时携带 `Idempotency-Key`。
+单项审核 `decision` 为 `SATISFY`、`REQUEST_ACTION` 或 `WAIVE`，并显式提交 evidence 及其关系。`REQUEST_ACTION` 必须有 `issue_code` 和面向客户的明确说明；`WAIVE` 必须有原因且永远不由 AI 自动执行。整单批准接口再次检查所有必填项，AI 不得自动进入 `READY_FOR_BOOKKEEPING`。所有修改状态的请求携带当前 `version`；发布、提交、退回、批准、撤回批准和关闭同时携带 `Idempotency-Key`。
 
 ## 10. AI 接口边界
 
-AI 服务只接受分析任务并返回建议，不连接主数据库，也不直接发通知。Backend Worker 通过内部 HTTP 调用：
+### 10.1 两阶段处理
+
+上传阶段只做最小分类：
+
+```text
+完整文件上传 → 安全扫描 → CLASSIFY run → 返回资料类别 → 客户确认/拖动调整
+```
+
+`CLASSIFY` 只能返回 `REQUIREMENT | OTHER | INVALID`、`document_type`、`requirement_id` 和 `confidence`。此阶段不检查主体、期间和金额，不持久化完整提取字段，不搜索历史资料，不产生审核决定，也不修改 requirement/collection 状态。只有客户显式确认合入后，Backend 才按普通人工上传的规则关联文件并将待收集项标为 `RECEIVED`；这不是 AI 审核决定。
+
+首批本地功能（B6.2/A2/F7.1/F7.2）用 `AGENT_CLASSIFICATION_PROVIDER=MOCK` 验证交互，页面必须显示模拟标识，生产禁用 MOCK。分类 run 的成功/失败与用户确认分开：`confirmed_at` 和 `confirmation` 保存幂等合入结果。取消不会关联暂存文件；扫描后可改为手动分类。远端模型未提供协议及凭据前，不宣称分类准确率或真实模型联调完成。
+
+客户正式提交后再执行完整审核：
+
+```text
+提交 → IN_REVIEW → REVIEW run → 字段提取 → 当前/历史资料搜索 → 证据与金额核对 → 后端自动单项审核或转人工
+```
+
+### 10.2 Backend-Agent 协议
+
+Backend-Agent 线上 JSON 统一使用 `snake_case`；前端仍只在 Axios 边界转换为 `camelCase`。`acc-system-agent` 不连接主数据库、不直接发通知、不修改业务状态。Backend Worker 通过内网 HTTP 调用：
 
 ```http
 POST /v1/analyze
-Idempotency-Key: <ai_run_id>
+Idempotency-Key: <ai_run_id>:<turn>
 ```
 
-请求体：
+请求的 `purpose` 固定为 `CLASSIFY | REVIEW`。Backend 只发送文档引用，Agent 在只读资料卷中验证路径和 SHA-256 后读取完整文件：
 
 ```json
 {
   "schema_version": "1",
   "run_id": "uuid",
-  "client": {
-    "id": "uuid",
-    "legal_name": "Alpha Consulting Pte. Ltd.",
-    "base_currency": "SGD",
-    "features": {"has_loan": true}
+  "purpose": "REVIEW",
+  "turn": 0,
+  "context": {
+    "entity_name": "Alpha Consulting Pte. Ltd.",
+    "period": "2026-08-01",
+    "submission_id": "uuid"
   },
-  "collection": {"id": "uuid", "period": "2026-08"},
   "requirements": [
     {
       "id": "uuid",
-      "type": "BANK_STATEMENT",
-      "criteria": {"bank": "UOB", "entity": "Alpha Consulting Pte. Ltd.", "period": "2026-08"}
+      "analysis_type": "DOCUMENT_REQUIREMENT_VALIDATION",
+      "document_type": "BANK_STATEMENT",
+      "title": "UOB bank statement",
+      "required": true,
+      "instructions": "Full statement for the requested period"
     }
   ],
   "documents": [
     {
-      "id": "uuid",
-      "period": "2026-08",
-      "document_type": "BANK_STATEMENT",
-      "download_url": "short-lived internal URL"
+      "document_id": "uuid",
+      "storage_key": "firm/client/uuid",
+      "content_type": "application/pdf",
+      "sha256": "64-character-lowercase-hex",
+      "original_name": "statement.pdf",
+      "requirement_ids": ["uuid"],
+      "scope": "CURRENT"
+    }
+  ],
+  "search_history": []
+}
+```
+
+`CLASSIFY` 响应只包含分类结果；`REVIEW` 响应可包含提取字段、findings、evidence、面向客户的补交消息和结构化金额关系：
+
+```json
+{
+  "schema_version": "1",
+  "run_id": "uuid",
+  "model_version": "model-v1",
+  "search": null,
+  "extractions": [{"document_id": "uuid", "entity_name": "Alpha Consulting Pte. Ltd.", "period": "2026-07-01"}],
+  "findings": [
+    {
+      "requirement_id": "uuid",
+      "action": "ASK_CLIENT",
+      "suggested_decision": "REQUEST_ACTION",
+      "issue_code": "WRONG_PERIOD",
+      "confidence": 0.99,
+      "entity_check": "MATCH",
+      "period_check": "MISMATCH",
+      "explanation": "The statement covers July, but August was requested.",
+      "evidence": [{"document_id": "uuid", "relation": "CONTRADICTS", "reason": "The period on the statement differs from the request."}],
+      "amounts": [],
+      "client_message": "Please upload the statement for the requested period."
     }
   ]
 }
 ```
 
-返回体沿用参考模型的动作语义：
+`REVIEW` 动作固定为 `SEARCH_CURRENT | SEARCH_HISTORY | ASK_CLIENT | RESOLVE | ESCALATE`，最多执行三轮搜索。Backend 必须校验 schema、run id、租户/客户证据归属和枚举值；金额使用十进制字符串传输并用 `Decimal` 重算。达到当前请求阈值的 `SATISFY/REQUEST_ACTION` 可自动执行；低置信度、非法证据、计算不一致或 `ESCALATE` 转人工。
 
-```json
-{
-  "schema_version": "1",
-  "run_id": "uuid",
-  "action": "SEARCH_MORE",
-  "observation": "string",
-  "reasoning_result": "string",
-  "findings": [
-    {
-      "requirement_id": "uuid",
-      "suggested_status": "NEEDS_ACTION",
-      "issue_code": "WRONG_PERIOD",
-      "evidence_document_ids": ["uuid"],
-      "confidence": 0.97
-    }
-  ],
-  "requested_document": null,
-  "client_message": null
-}
-```
+搜索轮响应的 `findings` 必须为空，`search` 包含 `action`、`requirement_id` 以及可选 `document_type/period/query/amount/currency`；Backend 执行租户/客户限定搜索并增加下一轮输入。最终结果必须覆盖每个输入文件和资料项。金额关系使用 `SUM/SUBTRACT/MULTIPLY`，每个 operand 为 `{document_id, amount, label}`，强制关联证据。实际严格定义见 Backend/Agent 同步的 `app/analysis_schemas.py`。
 
-`action` 固定为 `SEARCH_MORE | ASK_CLIENT | RESOLVE | ESCALATE`。后端校验 schema、run id、证据归属和枚举值后保存到 `ai_runs.output`，再由会计人员确认。短期下载 URL 仅允许 AI 网络访问、绑定文件 id，并在数分钟后过期。
+**当前实现边界（B6.3/A3，2026-09-22）**：已接通提交后分析、最多三轮搜索、证据验证、Decimal 重算及页面展示；SUGGEST/AUTO_REVIEW 目前均只保存分析建议，OFF 不创建 REVIEW。自动决定、人工显式 evidence/覆盖与 Outbox 在 B6.4 实现。开发环境使用 `AGENT_REVIEW_PROVIDER=MOCK` 固定案例，生产禁止模拟；真实模型协议尚待提供，不能把模拟结果当作文件真实提取或模型准确率验证。
 
 ## 11. 前端设计
 
@@ -498,9 +546,10 @@ Idempotency-Key: <ai_run_id>
 - `/app/dashboard` 默认显示 `待我审核`、`等待客户`、`即将到期`、`已逾期` 四个队列和数量；
 - `/app/collections` 使用服务端分页表格，固定筛选项为客户、期间、状态、负责人、截止日期；筛选条件写入 URL query，返回列表时不丢失；
 - 桌面端点击表格行先打开右侧详情面板，支持继续打开完整页面；窄屏直接进入完整页面；
-- `/app/collections/:id/review` 使用三块区域：左侧资料要求列表，中间文件预览/提取字段，右侧审核动作与 AI 建议；活动时间线作为同页 tab/drawer；
+- `/app/collections/:id/review` 使用三块区域：左侧资料要求列表，中间文件预览/提取字段，右侧审核动作与 AI 结果；活动时间线统一位于请求详情页；
 - 只展示当前状态和权限允许的业务动作，例如“发布”“要求补交”“批准进入记账”“关闭”，不提供任意状态下拉框；
-- AI 建议使用独立视觉标识，必须点击“采纳并填写审核决定”才会影响业务状态。
+- 创建请求时配置 AI 模式、自动满足阈值和自动退回阈值；上传阶段只显示类别、目标资料项和置信度，不提前显示审核结论；
+- 提交后的 AI 自动决定使用独立视觉标识，展示模型版本、证据、提取字段、金额关系和转人工原因；会计可追加人工决定覆盖 AI 结果。
 
 客户端：
 
@@ -601,7 +650,7 @@ Worker 按第 8.4 节的租约规则领取任务，失败后指数退避。`dedu
 
 Outbox 提供的是“至少一次”投递：如果外部渠道发送成功后 Worker 在回写前崩溃，邮件仍可能重复。`dedupe_key` 负责防止重复创建任务；渠道支持幂等键时继续透传。首版不为追求不可能的跨系统原子提交引入消息中间件，页面中的请求状态始终是最终依据。
 
-首选先实现一种 Email provider（SMTP 或 SES），飞书实现相同的最小调用约定：
+首版只建立 Outbox，`NOTIFICATION_DELIVERY_ENABLED=false`。自动要求补交时，为该客户所有有效 `CLIENT_ADMIN/CLIENT_SUBMITTER` 按邮箱去重创建 `SUPPRESSED` 记录，原因为 `PROVIDER_DISABLED`；将来启用渠道时不补发旧记录。Email/SES 或飞书出现明确上线需求时，再实现相同的最小调用约定：
 
 ```python
 send(recipient: str, template: str, payload: dict) -> None
@@ -620,33 +669,37 @@ send(recipient: str, template: str, payload: dict) -> None
 | `backend` | ECR `acc-system-backend` | FastAPI API |
 | `worker` | 同一个 backend 镜像 | 仅覆盖启动命令，不重复构建镜像 |
 | `migrate` | 同一个 backend 镜像 | 一次性执行 `uv run alembic upgrade head` |
+| `agent` | ECR `acc-system-agent` | 本地 AI Harness，读取只读资料卷并调用远端模型 |
 | `postgres` | 官方 PostgreSQL 固定版本/摘要 | 使用独立持久卷，不重打无变化的自定义镜像 |
 | `redis` | 官方 Redis 固定版本/摘要 | JWT refresh session、撤销和限流；仅内网访问 |
 | `clamav` | 官方镜像，可按环境启用 | 上传文件恶意内容扫描 |
 
 数据库和 Redis 已经分别是独立 Docker image。除非确实需要扩展或初始化脚本，不复制官方 Dockerfile，也不推送同内容镜像到 ECR。
 
+Compose 通过 `AGENT_IMAGE` 固定 Agent 镜像 SHA；Backend/Worker 使用 `AGENT_URL=http://agent:8000`，Agent 使用 `MODEL_API_URL`、`MODEL_HEALTH_URL`、`MODEL_API_KEY`、`MODEL_CONNECT_TIMEOUT_SECONDS`、`MODEL_REQUEST_TIMEOUT_SECONDS` 和 `DOCUMENT_PATH=/data/documents`。`MODEL_HEALTH_URL` 显式指定只读健康探针地址，不用推理请求做健康检查；真实模型协议未提供前，健康响应约定仅用于基线测试。Agent live 与 ready 分离，模型未配置不会阻止人工业务服务启动。
+
 ### 13.2 Compose 约束
 
 - 仅 `nginx` 映射宿主机 `80/443`；
-- `frontend`、`backend`、`worker`、`postgres`、`redis` 在 internal network；
+- `frontend`、`backend`、`worker`、`agent`、`postgres`、`redis` 在 internal network；
 - PostgreSQL、资料目录和证书使用命名卷或明确的宿主机目录；
 - backend/worker 对资料卷读写，Nginx 只读挂载最终资料目录并仅通过 `internal` location 提供文件；隔离区不挂载给 Nginx；
+- agent 只读挂载最终资料目录，不映射宿主机端口，不挂载数据库或 Redis 凭据；
 - `backend` 在 `migrate` 成功后启动，并等待 PostgreSQL/Redis healthcheck；
 - Nginx 将 `/api/` 转发到 backend，将其他路径转发到 frontend；
 - Nginx 和 FastAPI 都配置上传大小与超时，二者限制保持一致；
 - `/api/v1/health/live` 只检查进程，`/api/v1/health/ready` 检查 PostgreSQL 和 Redis；
-- 生产 `.env` 只保存在服务器，数据库密码、JWT 签名密钥、AWS、SMTP/飞书密钥不进入镜像或 Git。
+- 生产 `.env` 只保存在服务器，数据库密码、JWT 签名密钥、AWS、`MODEL_API_KEY` 不进入镜像或 Git。
 
 ### 13.3 GitHub Actions 与 ECR
 
-前后端仓库各自独立发布：
+前端、后端和 Agent 仓库各自独立发布：
 
 1. push/PR 先执行测试与构建；
 2. 仅 `main` 或 release tag 使用 GitHub OIDC 获取 AWS 临时凭证；
 3. 使用 BuildKit 构建并缓存层；
 4. 推送 `<git-sha>` 不可变标签，同时更新 `main` 标签；
-5. 服务器 `.env` 固定前后端 SHA 标签，避免 `latest` 导致不可复现部署。
+5. 服务器 `.env` 固定前端、后端和 Agent 的 SHA 标签，避免 `latest` 导致不可复现部署。
 
 服务器发布命令保持简单：
 
@@ -667,22 +720,22 @@ CI 只构建和推送，不直接 SSH 生产服务器。需要自动部署时，
 - 文件下载使用授权检查和 `Content-Disposition: attachment`，不在浏览器内执行不可信 HTML/SVG；
 - 对外响应使用明确的 Pydantic response model，不直接序列化 ORM 对象；portal 模型中不存在 `internal_note`、AI 原始输出和其他事务所字段；
 - 数据库迁移先向后兼容，再发布应用；破坏性字段删除放到后续版本；
-- 告警至少覆盖 API 不可用、Worker 积压、通知连续失败、磁盘空间和备份失败。
+- 告警至少覆盖 API 不可用、Worker 积压、AI 连续失败、磁盘空间和备份失败。
 
 ## 15. 最小验收场景
 
 1. 管理员邀请会计和客户联系人；越权访问其他事务所/客户返回 404 或 403。
 2. 会计创建并发布 2026-08 请求，客户收到入口并上传资料。
-3. 客户先上传错主体文件，审核标记 `NEEDS_ACTION + ENTITY_MISMATCH`；文件仍在历史中。
-4. 客户补交错期间文件后再次提交，状态仍不能满足。
+3. 客户批量上传文件；`CLASSIFY` 只返回资料类别，客户可拖动调整，确认前不进入正式清单。
+4. 客户提交错主体/错期间文件后才启动 `REVIEW`；达到阈值时自动标记 `NEEDS_ACTION`，文件和决定历史仍保留。
 5. 客户上传正确文件，会计将要求标为 `SATISFIED` 并批准，整单进入 `READY_FOR_BOOKKEEPING`。
-6. B01/B02/F02 等场景可把多份文件关联到同一要求；B03 可关联历史期间文件。
+6. B01/B02/F02 等场景可把多份文件关联到同一要求；B03 可经授权搜索关联历史期间证据。
 7. 任一必填要求未满足时，批准接口必须失败，即使前端或 AI 请求批准。
-8. AI 和通知服务停机时，上传、人工审核和批准仍然可用；失败任务可恢复重试，定时扫描不会重复创建同一 `dedupe_key` 的通知任务。
+8. Agent/远端模型停机时，上传、手动分类、人工审核和批准仍然可用；失败任务可恢复重试。
 9. access JWT 过期时，并发请求只触发一次 refresh；登出后旧 refresh JWT 和同一 `sid` 的 access JWT 均不可继续使用。
 10. Axios 字段转换测试覆盖嵌套对象、数组、query、错误响应、上传 `File` 和下载 `Blob`。
 11. 两个会计打开同一要求时，后提交的旧版本收到 `409`；批准与单项退回并发时不能错误进入 `READY_FOR_BOOKKEEPING`。
-12. Worker 在领取任务后被终止，租约过期后任务可重试；同一 `dedupe_key` 只存在一条任务，并接受外部渠道为“至少一次”投递。
+12. Worker 在领取任务后被终止，租约过期后任务可重试；同一 AI run 不重复产生自动决定，同一 `dedupe_key` 只存在一条 Outbox 记录。
 13. 文件在扫描完成前不可下载；扫描成功后只能通过已授权的下载接口访问，直接请求 Nginx 内部路径返回拒绝。
 14. portal 响应不包含内部备注和 AI 原始输出；猜测其他事务所的资源 id 无法读取或关联。
 15. 相同 `Idempotency-Key` 和相同请求返回原结果；同 key 不同请求返回 `409`。
@@ -695,11 +748,15 @@ CI 只构建和推送，不直接 SSH 生产服务器。需要自动部署时，
 4. B3 + F4：收集请求、资料要求、Dashboard、列表、发布与事件；
 5. B4 + F5：文件隔离处理、客户门户与首次提交；
 6. B5 + F6：多轮补交、证据关联、审核状态机和 `READY_FOR_BOOKKEEPING` 完成条件；
-7. B6 + F6 收尾：通知 outbox、Email、AI 建议接口与上线回归，飞书按需要接入。
+7. B6.1 + A1：AI 数据模型、Agent 服务基线和 Compose/ECR 部署；
+8. B6.2 + A2 + F7.1/F7.2：请求 AI 策略、完整文件的上传快速分类与客户确认；
+9. B6.3 + A3 + F7.3：客户提交后的完整审核、当前/历史搜索和证据关系；
+10. B6.4 + F7.3：自动单项审核、人工覆盖、Outbox 和综合验收。
 
 第 6 步完成后，即使关闭 AI 和消息渠道，系统也已经具备账户、收集、提交、退回、补交和批准的完整人工业务闭环。
 
 ## 17. 开发执行文档
 
 - [后端开发文档](./README_后端开发文档.md)：B1-B6 的交付内容、阶段验收场景和完成标准；
-- [前端开发文档](./README_前端开发文档.md)：F1-F6 的页面交付、接口依赖、阶段验收场景和完成标准。
+- [前端开发文档](./README_前端开发文档.md)：F1-F7 的页面交付、接口依赖、阶段验收场景和完成标准；
+- [Agent 开发文档](./README_Agent开发文档.md)：A1-A3 的服务基线、快速分类、完整审核和验收场景。
