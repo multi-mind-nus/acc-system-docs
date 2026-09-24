@@ -62,7 +62,7 @@ B2 账户测试会清空数据库和 Redis，完整 `uv run pytest` 必须使用
 | B3 收集请求 | 创建、发布、复制、查询、取消、事件与并发保护 | F4 |
 | B4 文件与客户提交 | 隔离上传、扫描、下载、历史检索和首次提交 | F5 |
 | B5 审核与审批 | 单项审核、多轮补交、证据关联、批准、撤回与关闭 | F6 |
-| B6 AI 审核与上线加固 | AI 策略、任务队列、Agent 接入、证据搜索、自动单项审核和 Outbox | F7、A1-A3 |
+| B6 AI 审核与上线加固 | AI 策略、任务队列、Agent 接入、证据搜索、问题自动退回和 Outbox | F7、A1-A3 |
 
 B1 与 F1 是同一个部署阶段的两部分，可以并行开发；早期可暂用占位前端镜像验证反向代理，但阶段验收必须换成 F1 的真实镜像。
 
@@ -321,7 +321,7 @@ F6/B5 中“当前轮文件自动记录为审核证据”是人工闭环的已�
 
 ### 9.1 阶段目标
 
-在不改变 PostgreSQL 业务事实源的前提下接入 `acc-system-agent`：上传阶段只快速分类，客户提交后再完整审核；后端校验 Agent 输出后按请求阈值自动执行单项决定，整单批准仍由会计完成。
+在不改变 PostgreSQL 业务事实源的前提下接入 `acc-system-agent`：上传阶段只快速分类，客户提交后再完整审核；后端校验 Agent 输出后自动处理高置信度单项，任一项未通过就退回客户，全部通过后由会计确认整单。
 
 ### 9.2 交付内容
 
@@ -334,10 +334,10 @@ F6/B5 中“当前轮文件自动记录为审核证据”是人工闭环的已�
 - 客户提交时原子进入 `IN_REVIEW` 并创建 `REVIEW` run；提交前不做主体、期间、金额或证据审核；
 - 按客户、期间、资料类型、编号、对手方和金额搜索当前/历史资料；Agent 最多发起三轮 `SEARCH_CURRENT/SEARCH_HISTORY`；
 - 后端校验 Agent schema、run id、枚举、租户/客户 evidence 归属，并用 `Decimal` 重算结构化金额关系；
-- 达到当前请求阈值的 `SATISFY/REQUEST_ACTION` 可生成 `source=AI` 的单项决定；`WAIVE`、低置信度、非法证据、计算不一致和 `ESCALATE` 转人工；
+- 达到阈值的 `REQUEST_ACTION` 和 `SATISFY` 可生成 `source=AI` 的单项决定；任一 `REQUEST_ACTION` 自动退回整单，全部单项完成后只开放人工整单批准；`WAIVE`、低置信度、非法证据、计算不一致和 `ESCALATE` 转人工；
 - AI 状态迁移产生 `actor_type=SYSTEM` 的工作流事件；人工覆盖继续记录真实用户 actor，二者都只追加；
 - 人工审核显式提交 evidence 及其 `SUPPORTS/CONTRADICTS/REFERENCE` 关系，可追加新决定覆盖 AI 当前结果；
-- 任一必填项被自动退回时，整单与决定、事件和 Outbox 在同一事务进入 `CHANGES_REQUESTED`；AI 永远不自动豁免或批准整单；
+- AI 的 `REQUEST_ACTION` 自动更新单项并把整单转为 `CHANGES_REQUESTED`，`SATISFY` 自动满足单项。AI 决定、SYSTEM 事件和 Outbox 在同一事务提交；AI 永远不自动豁免或批准整单；
 - `notification_outbox` 按邮箱为客户管理员和提交人去重；首版不实现发信 provider，任务直接记为 `SUPPRESSED/PROVIDER_DISABLED`；
 - JSON 结构化日志、AI 积压/失败/磁盘/备份告警，以及 PostgreSQL/资料卷恢复演练。
 
@@ -353,7 +353,7 @@ F6/B5 中“当前轮文件自动记录为审核证据”是人工闭环的已�
 | B6-A6 | F04 外币/手续费或 F05 进度款/保留款 | Backend 使用 `Decimal` 重算；模型差额错误时转人工而不改状态 |
 | B6-A7 | finding 低于阈值、evidence 属于其他租户/客户或 Agent 返回非法 schema | 拒绝自动执行，run 进入可重试/失败或人工队列，无部分业务更新 |
 | B6-A8 | Worker 领取 run 后被终止或重放同一 run | 租约过期后可重领；同一 `ai_run + requirement` 不产生重复决定 |
-| B6-A9 | AI 将所有必填项判定为满足 | 各单项可进入 `SATISFIED`，但整单仍保持 `IN_REVIEW`，必须由会计批准 |
+| B6-A9 | AI 将所有必填项判定为满足 | 单项保持待会计确认，整单保持 `IN_REVIEW`；会计保存单项结论后才能批准 |
 | B6-A10 | AI 自动要求补交 | 为有效客户管理员/提交人按邮箱去重创建 `SUPPRESSED/PROVIDER_DISABLED` Outbox，不实际发信 |
 | B6-A11 | 会计显式选择 evidence 并提交新决定 | 新的人工决定成为当前结果，AI 和历史人工决定仍可追溯 |
 | B6-A12 | Agent/远端模型停机后完成上传、手动分类、人工审核和批准 | 人工业务闭环继续可用，AI 失败不被显示成审批失败 |
@@ -410,9 +410,18 @@ B6.1/A1 记录保留为历史技术检查，本次向用户交付页面功能，
 - 自动检查：Backend **52 passed**，Agent **33 passed**，Frontend **49 passed**，前端 lint/类型检查/构建通过；覆盖超时重试、旧租约、迟到结果、金额差错、三轮搜索上限、跨客户/事务所隔离、OFF 模式、轮次切换和展示转义。
 - Compose 实测：隔离客户 `AI Review Demo` 的 2027 年 3 月提交 10 份参考样例，搜索找到 2 月请求中的 1 份历史文件；生成 7 个 finding，状态仍 IN_REVIEW，无 AI 审核决定。本地会计账号 `review@test.com / review123`，原验收客户账号 `ai@test.com / ai123`；模型数据均为明确标注的固定模拟场景，不是数据集准确率验收。
 
-### 9.7 阶段完成标志
+### 9.7 B6.4 + F7.3 第二批本地功能（2026-09-24，用户验收通过）
 
-系统完成上传快速分类、提交后完整审核、自动单项决定和人工兜底；整单批准仍由会计完成。Email/飞书 provider、向量数据库、SQLAdmin、S3、Celery、PostgreSQL RLS 和自定义流程引擎继续延后。
+- `AUTO_REVIEW` 对达到阈值的 `REQUEST_ACTION` 和 `SATISFY` 生成 `source=AI` 决定；任一未通过项自动退回整单，全部通过时保持 `IN_REVIEW` 并开放人工整单确认。`SUGGEST`、低置信度、金额重算不一致和 `ESCALATE` 保持人工处理。
+- AI 决定追加 `actor_type=SYSTEM` 的单项事件，自动退回时再追加整单事件；AI 不自动豁免或批准整单。
+- 人工审核不再自动把当前轮全部文件写成 evidence；页面显式勾选当前或历史证据，Backend 再校验证据属于同一事务所、同一客户且来自有效已提交资料。
+- AI 自动要求补交时，为有效客户成员按邮箱去重生成 `AI_REQUIREMENT_ACTION` Outbox；首版固定为 `SUPPRESSED/PROVIDER_DISABLED`，不实际发信。
+- 无新增数据库迁移；本地 Backend/Worker 镜像版本 `b6.4-f7.3-local`。自动检查：Backend **56 passed**，Frontend **49 passed**，前端 lint、类型检查和构建通过。
+- 本地验收案例：`AI Review Demo / June 2027` 含 G02/G03 问题并自动进入待补交；`AI Review Demo / July 2027` 全部通过后保持审核中，仅等待会计确认整单。会计 `review@test.com / review123`。模拟结果不代表模型准确率。
+
+### 9.8 阶段完成标志
+
+系统完成上传快速分类、提交后完整审核、问题自动退回、通过项自动满足和整轮人工确认；整单批准仍由会计完成。Email/飞书 provider、向量数据库、SQLAdmin、S3、Celery、PostgreSQL RLS 和自定义流程引擎继续延后。
 
 ## 10. 阶段验收记录模板
 
