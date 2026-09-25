@@ -25,7 +25,7 @@ MVP 必须完成：
 4. 客户可多轮补交；每轮提交、审核意见和状态变化都要保留。
 5. 只有全部必填要求均为 `SATISFIED` 或 `WAIVED`，整单才能进入 `READY_FOR_BOOKKEEPING`。
 6. F05 中“本次收款核对完成”不等于“全部款项已收齐”。整单完成状态必须描述核对范围，不能推导不存在的业务结论。
-7. AI 输出必须由后端校验权限、证据归属、金额和置信度；高置信度未通过项自动退回客户，达到阈值的通过项可自动满足，但只有本轮全部通过后才允许会计人工确认整单；`WAIVED` 和整单批准始终由人工执行。
+7. AI 输出必须由后端校验权限、证据归属和金额。请求级 `review_preference` 指导 Agent 在 `ASK_CLIENT` 与 `ESCALATE` 间选择；REVIEW 不使用或返回模型自报置信度。明确且可核对的问题可自动退回，AI 判断通过的单项可标记满足，本轮全部通过后仍由会计人工确认整单；`WAIVED` 和整单批准始终由人工执行。
 
 ## 3. 总体架构
 
@@ -183,7 +183,7 @@ AVAILABLE   -> EXCLUDED
 
 | 表 | 关键字段 |
 | --- | --- |
-| `collection_requests` | `id`, `firm_id`, `client_id`, `period`, `due_at`, `status`, `scope_note`, `ai_mode`, `ai_satisfy_threshold`, `ai_request_action_threshold`, `version`, `created_by`, `submitted_at`, `approved_by`, `approved_at` |
+| `collection_requests` | `id`, `firm_id`, `client_id`, `period`, `due_at`, `status`, `scope_note`, `ai_mode`, `review_preference`, legacy `ai_satisfy_threshold` / `ai_request_action_threshold`, `version`, `created_by`, `submitted_at`, `approved_by`, `approved_at` |
 | `requirements` | `id`, `firm_id`, `request_id`, `origin`, `type`, `analysis_type`, `title`, `required`, `criteria jsonb`, `status`, `issue_code`, `client_message`, `internal_note`, `version`, `reviewed_by`, `reviewed_at` |
 | `submissions` | `id`, `firm_id`, `request_id`, `round_no`, `status`, `note`, `submitted_by`, `submitted_at` |
 | `documents` | `id`, `firm_id`, `client_id`, `request_id`, `submission_id`, `storage_key`, `original_name`, `mime_type`, `size_bytes`, `sha256`, `document_type`, `entity_name`, `period`, `status`, `scan_error`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `extracted_data jsonb`, `uploaded_by`, `created_at` |
@@ -197,7 +197,7 @@ AVAILABLE   -> EXCLUDED
 - `requirements.origin` 区分创建请求时的 `INITIAL` 项和审核中新增的 `FOLLOW_UP` 项。已发布要求不删除，只能满足或豁免。
 - `requirement_documents.relation` 使用 `SUPPORTS`、`CONTRADICTS`、`REFERENCE`，支持多发票对一笔付款、一张发票对多笔付款和报销证据链。
 - `analysis_type` 固定为 `DOCUMENT_REQUIREMENT_VALIDATION | BANK_TRANSACTION_RECONCILIATION`，仅供 Backend/Agent 内部使用，不让会计选择。创建/新增/修改/复制时，银行对账单默认对账提示，其他资料默认要求校验；最终检查由提交后的 REVIEW 根据实际资料安排，不是互斥的两种业务流程。交易日期、描述、带符号金额和币种应从本次提交的对账单中提取，而不是在创建请求时手填。已有 `criteria.target_transaction` 保留历史，不作为新轮次的默认交易事实；复制请求不携带旧交易目标。
-- 新请求默认 `AUTO_REVIEW` 且双阈值为 `0.980`；迁移前已有请求统一设为 `SUGGEST`，AI 策略只能在 `DRAFT` 修改。
+- 新请求默认 `AUTO_REVIEW + STANDARD`；请求级审核偏好为 `CAUTIOUS | STANDARD | EFFICIENT`，只指导 Agent 如何分流不确定情况，不降低事实或证据要求。旧 `ai_satisfy_threshold` / `ai_request_action_threshold` 保留兼容但不再参与决定；旧请求按原自动退回档位映射为偏好。AI 策略只能在 `DRAFT` 修改。
 - 上传分类确认后只写入 `document_type`；`entity_name`、`period` 和完整 `extracted_data` 只在客户提交后的 `REVIEW` 成功时写入。
 - `review_decisions.source` 固定为 `HUMAN | AI`；`workflow_events.actor_type` 固定为 `USER | SYSTEM`，SYSTEM 事件允许 `actor_id` 为空。
 - `review_decisions` 和 `workflow_events` 只追加，不更新历史；`requirements.status` 保存当前快照，方便查询。
@@ -442,6 +442,7 @@ Idempotency-Key: <ai_run_id>:<turn>
   "run_id": "uuid",
   "purpose": "REVIEW",
   "turn": 0,
+  "review_preference": "STANDARD",
   "context": {
     "entity_name": "Alpha Consulting Pte. Ltd.",
     "period": "2026-08-01",
@@ -487,7 +488,6 @@ Idempotency-Key: <ai_run_id>:<turn>
       "action": "ASK_CLIENT",
       "suggested_decision": "REQUEST_ACTION",
       "issue_code": "WRONG_PERIOD",
-      "confidence": 0.99,
       "entity_check": "MATCH",
       "period_check": "MISMATCH",
       "explanation": "The statement covers July, but August was requested.",
@@ -499,11 +499,13 @@ Idempotency-Key: <ai_run_id>:<turn>
 }
 ```
 
-`REVIEW` 动作固定为 `SEARCH_CURRENT | SEARCH_HISTORY | ASK_CLIENT | RESOLVE | ESCALATE`，最多执行三轮搜索。Backend 必须校验 schema、run id、租户/客户证据归属和枚举值；金额使用十进制字符串传输并用 `Decimal` 重算。达到阈值的 `REQUEST_ACTION` 自动执行并将整单转为 `CHANGES_REQUESTED`，达到阈值的 `SATISFY` 自动满足单项；只有本轮全部通过且所有资料项完成后，才允许会计人工批准整单。低置信度、非法证据、计算不一致或 `ESCALATE` 转人工。
+`REVIEW` 动作固定为 `SEARCH_CURRENT | SEARCH_HISTORY | ASK_CLIENT | RESOLVE | ESCALATE`，最多执行三轮搜索。Backend 必须校验 schema、run id、租户/客户证据归属和枚举值；金额使用十进制字符串传输并用 `Decimal` 重算。Agent 收到由 Backend 传入的固定枚举审核偏好，明确可补交事项使用 `ASK_CLIENT`，不确定时使用 `ESCALATE`。`AUTO_REVIEW` 下，通过后端校验的 `REQUEST_ACTION` 可将整单转为 `CHANGES_REQUESTED`；`SATISFY` 可满足单项，但整轮批准仍由会计执行。REVIEW finding 不含 `confidence`；证据不足、非法证据、计算不一致或 `ESCALATE` 转人工。
 
 搜索轮响应的 `findings` 必须为空，`search` 包含 `action`、`requirement_id` 以及可选 `document_type/period/query/amount/currency`；Backend 执行租户/客户限定搜索并增加下一轮输入。最终结果必须覆盖每个输入文件和资料项。金额关系使用 `SUM/SUBTRACT/MULTIPLY`，每个 operand 为 `{document_id, amount, label}`，强制关联证据。实际严格定义见 Backend/Agent 同步的 `app/analysis_schemas.py`。
 
 **当前实现边界（B6.4/F7.3，2026-09-24，用户验收通过）**：已接通提交后分析、最多三轮搜索、证据验证、Decimal 重算、高置信度问题自动退回、通过项自动满足和整轮人工确认、人工显式 evidence 与 `SUPPRESSED` Outbox。`SUGGEST` 只保存建议，`OFF` 不创建 REVIEW；豁免和整单批准保持人工。开发环境使用 `AGENT_REVIEW_PROVIDER=MOCK` 固定案例，生产禁止模拟；真实模型协议尚待提供，不能把模拟结果当作文件真实提取或模型准确率验证。
+
+**后续策略调整（待用户验收）**：保留上述历史验收记录，但当前代码已改为传递 `review_preference` 并由 Agent 在退回与转人工间选择；REVIEW 协议不再接受或返回 `confidence`。旧阈值字段只作 API/数据库兼容；历史审核记录对外读取时过滤旧分数，不改写原始数据。此调整尚未部署或经真实业务样本完成误退回率评估。
 
 ## 11. 前端设计
 
@@ -548,7 +550,7 @@ Idempotency-Key: <ai_run_id>:<turn>
 - 桌面端点击表格行先打开右侧详情面板，支持继续打开完整页面；窄屏直接进入完整页面；
 - `/app/collections/:id/review` 使用三块区域：左侧资料要求列表，中间文件预览/提取字段，右侧审核动作与 AI 结果；活动时间线统一位于请求详情页；
 - 只展示当前状态和权限允许的业务动作，例如“发布”“要求补交”“批准进入记账”“关闭”，不提供任意状态下拉框；
-- 创建请求时配置 AI 模式、通过建议阈值和自动退回阈值；上传阶段只显示类别、目标资料项和置信度，不提前显示审核结论；
+- 创建请求时配置 AI 模式与文字审核偏好；上传阶段只显示类别、目标资料项和分类置信度，不提前显示审核结论；
 - 提交后的 AI 自动决定使用独立视觉标识，展示模型版本、证据、提取字段、金额关系和转人工原因；会计可追加人工决定覆盖 AI 结果。
 
 客户端：
@@ -727,7 +729,7 @@ CI 只构建和推送，不直接 SSH 生产服务器。需要自动部署时，
 1. 管理员邀请会计和客户联系人；越权访问其他事务所/客户返回 404 或 403。
 2. 会计创建并发布 2026-08 请求，客户收到入口并上传资料。
 3. 客户批量上传文件；`CLASSIFY` 只返回资料类别，客户可拖动调整，确认前不进入正式清单。
-4. 客户提交错主体/错期间文件后才启动 `REVIEW`；达到阈值时自动标记 `NEEDS_ACTION` 并把整单退回客户，文件和决定历史仍保留。
+4. 客户提交错主体/错期间文件后才启动 `REVIEW`；Agent 返回明确补交动作且 Backend 核对矛盾证据后自动标记 `NEEDS_ACTION` 并把整单退回客户，文件和决定历史仍保留。
 5. 客户上传正确文件，会计将要求标为 `SATISFIED` 并批准，整单进入 `READY_FOR_BOOKKEEPING`。
 6. B01/B02/F02 等场景可把多份文件关联到同一要求；B03 可经授权搜索关联历史期间证据。
 7. 任一必填要求未满足时，批准接口必须失败，即使前端或 AI 请求批准。

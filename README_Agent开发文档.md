@@ -143,7 +143,7 @@ Agent 能使用完整文件返回最小分类 schema，对远端模型的额外�
 SEARCH_CURRENT | SEARCH_HISTORY | ASK_CLIENT | RESOLVE | ESCALATE
 ```
 
-finding 至少包含 `requirement_id`、`suggested_decision`、`issue_code`、`confidence`、`evidence[]` 和面向客户的 `client_message`。金额关系使用十进制字符串：
+finding 至少包含 `requirement_id`、`action`、`suggested_decision`、`issue_code`、`evidence[]` 和面向客户的 `client_message`。REVIEW finding 不包含 `confidence`；多余字段将被拒绝。金额关系使用十进制字符串：
 
 ```json
 {
@@ -159,7 +159,7 @@ finding 至少包含 `requirement_id`、`suggested_decision`、`issue_code`、`c
 }
 ```
 
-Agent 校验输出结构，Backend 负责证据归属、`Decimal` 重算、置信度阈值与状态迁移。
+Agent 校验输出结构，Backend 负责证据归属、`Decimal` 重算与状态迁移。`review_preference` 由 Backend 传入，用于指导 Agent 在 `ASK_CLIENT` 与 `ESCALATE` 间分流，不能降低事实和证据要求。
 
 ### 6.3 可验收场景
 
@@ -186,7 +186,29 @@ G02、G03、B01、B03、F02、F04 和 F05 的固定模型桩联合验收通过�
 - REMOTE 复用 Bearer 完整文件 JSON transport；真实模型协议仍待提供。单进程最近 128 结果缓存，相同 run:turn 返回一致响应，冲突内容拒绝，重启/多副本依赖远端幂等键与 Backend 持久化去重。
 - 自动测试 **33 passed**，包括固定场景、幂等冲突、非法 schema/枚举/证据/金额、完整文件远端传输和生产拒绝 MOCK。A3 的真实模型准确率与供应方联调尚未验收。
 
-## 7. 阶段验收记录模板
+## 7. Novita OCR 与 Flash 接入增量（2026-09-25）
+
+保留 A1–A3 的历史验收记录；本节是其后的真实服务适配，不能把此前 MOCK 场景视为模型准确率验收。
+
+- 新增 `DEEPSEEK` provider。图片及 PDF 的每一页先经 Novita `deepseek/deepseek-ocr-2` 识别，再把 OCR 文本交给 Novita Flash。初始联调使用 V4，现行默认模型为 `deepseek/deepseek-v4.1-flash`；两次调用均使用其 OpenAI 兼容 Chat Completions。Agent 不部署模型权重，也不连接业务数据库。
+- `CLASSIFY` 只产生类别、目标资料项和分类置信度；`REVIEW` 产生提取、finding、evidence、搜索动作和金额关系，不包含 `confidence`。模型输出继续经过严格 schema 校验，Backend 继续负责授权搜索、Decimal 重算和业务状态。OCR 失败、截断或未配置时必须显式失败，不能以文件名模拟结果冒充真实审核。
+- Compose 用 `NOVITA_API_KEY` 为 OCR 与 Flash 提供同一凭据；可选 `OCR_*` 和 `MODEL_*` 覆盖各自 URL、模型与凭据。默认地址均为 `https://api.novita.ai/openai/v1/chat/completions`。初始接入时真实端到端测试尚未完成，后续选定样本结果见 7.1；密钥不保存在仓库或文档。
+- 新增 `POST /v1/analyze-inline`：以 `content_base64` 代替共享卷路径，使用 `AGENT_API_KEY` Bearer 鉴权；两种 purpose 使用同一输入/输出业务协议。面向外部复用时需置于 HTTPS、限流和可信网关之后。原 `/v1/analyze` 保持 Folio 内网接口。
+- 新增测试覆盖 PNG 与真实 PDF 页渲染、OCR 先于 Flash、OCR 文本而非原始二进制进入 Flash、独立 API 鉴权、校验和、审核 ESCALATE。仍需用 Novita 实际调用及 G02/G03/B01/B03/F02/F04/F05 材料做准确率和延迟验收。
+- 初始接入验证记录：49 个自动测试通过，Agent Docker 镜像构建通过；Novita 真实调用已跑通图片 OCR→分类、图片 OCR→审核、G02 错期间 PDF（`ASK_CLIENT/WRONG_PERIOD`）和 G03 错主体 PDF（`ASK_CLIENT/ENTITY_MISMATCH`）。G03 曾有一次结构不合约的输出被拒绝；调整提示后重测通过。该记录不代表后续样本或稳定准确率的验收状态。
+
+### 7.1 基于选定真实样本的通用改进与回归
+
+- 不按 case ID 或文件名决定真实审核结论。任务提供的指定交易仅作为审核范围，须从银行文件 OCR 核实；未指定交易时不能猜测其中一笔为目标。
+- Backend 在 REVIEW 文件引用中携带 `submission_round`。旧轮错误文件继续留作审计；新轮有经 OCR 验证的有效更正材料时，Agent 以最新轮次判断该资料项，不再因旧文件仍在输入里重复退回。
+- 对缺失支持资料先搜索当前和历史记录；未结清项目登记表只作辅助，不能代替原始发票。外币换算、手续费、进度款保留款均须给出完整证据链和可用 `Decimal` 复算的结构化金额关系。模型生成的 `model_version` 不可信，由 Agent 按实际请求模型配置写入。
+- 审核模型不接收原文件名，避免数据集的 `wrong/correct` 文件名泄露答案；Backend 仍保留文件名供展示和审计。若未结清登记表的发票编号与已引用的原始发票匹配，必须把登记表一并列入历史证据；不相关登记表不引用。
+- Agent 的不合约结果最多要求模型修正两次，仍不合约则显式失败。相同文件的成功 OCR 文本按哈希在单进程缓存；PDF 原生渲染串行，图片 OCR 可并行。Backend 的历史/当前搜索遇到过窄元数据过滤零命中时，在相同事务所、客户和搜索范围内重试宽松查询。
+- V4.1 Flash 的多文件 REVIEW 将输出预算从 8192 提到 16384；输出截断仍被拒绝，不返回半份 JSON。修正请求只包含简短校验错误，不回灌完整错误响应。`SATISFY` 除算式自洽外，还要求每步金额差额不超过半分舍入容差；Backend 独立检查这一点。
+- 用 `REVIEW_PROVIDER=DEEPSEEK uv run python -m scripts.evaluate_v5 --phase trajectory <case_dir>` 可复现多轮流程；ground truth 仅用于评价，不发给模型。使用 V4.1 Flash 且不向模型传文件名，选定六个样本各有一次完整轨迹通过：G02_0026/G03_0055 错材料退回后补交通过；B01_0850/B03_1822/F04_0903/F05_0249 完成搜索/补交后的 `RESOLVE/SATISFY`，最终 evidence 文件集合和金额关系符合答案。F04/F05 包含干扰材料，未被引用。B03 的登记表必须与所引用发票编号匹配且被列入证据。
+- 历史测试时 Agent 60 passed，Backend 新增搜索/文件类型/金额差额单元测试 3 passed。F02 和全数据集尚未评价；随机输出稳定性、延迟、成本及生产联调未验收。当时模型给出的 G02 更正件 0.95、B01 齐件 0.97 会因旧请求阈值转人工；当前已取消该自报分数门槛，一次样本通过仍不等于生产可自动放行。
+
+## 8. 阶段验收记录模板
 
 ```text
 阶段：A1/A2/A3

@@ -428,6 +428,12 @@ B6.1/A1 记录保留为历史技术检查，本次向用户交付页面功能，
 
 系统完成上传快速分类、提交后完整审核、问题自动退回、通过项自动满足和整轮人工确认；整单批准仍由会计完成。Email/飞书 provider、向量数据库、SQLAdmin、S3、Celery、PostgreSQL RLS 和自定义流程引擎继续延后。
 
+### 9.9 审核偏好替代自报置信度门槛（待用户验收）
+
+上文 B6.1–B6.4 的阈值描述保留为当时验收记录；当前代码使用 `0015_review_preference` 增加 `review_preference=CAUTIOUS|STANDARD|EFFICIENT`。旧双阈值仍留在 API/数据库中供历史兼容，迁移时按原自动退回档位映射，但不再参与审核状态迁移。创建、修改、复制草稿均保存文字偏好；提交时把偏好写入 REVIEW run 输入快照并传给 Agent。REVIEW finding 不接受 `confidence`；读取旧 run 时对外过滤该字段，历史数据库记录不改写。
+
+Agent 依偏好选择 `ASK_CLIENT`、`RESOLVE` 或 `ESCALATE`；Backend 仍校验 ID、租户/客户证据、金额。主体/期间不符必须带最新提交轮次的 `CONTRADICTS` 证据和对应 `MISMATCH` 检查，不能拿旧轮次错误文件覆盖新更正件；缺失/不完整项须先搜索。不可读或笼统 `OTHER` 问题不自动退回。`SUGGEST` 不产生 AI 决定，`AUTO_REVIEW` 对可核对的明确问题自动退回，对 AI 通过项标记满足，整单仍由会计确认。此改动已通过本地自动检查；真实材料误退回率与页面验收尚未完成，不宣称生产准确率。
+
 ## 10. 阶段验收记录模板
 
 每完成一个阶段，在 issue/release 中保存：

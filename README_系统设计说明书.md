@@ -97,7 +97,7 @@
 | 反复提醒耗时 | Dashboard、截止日期、状态筛选、通知 Outbox | 会计可快速定位等待客户、逾期和待审核请求 |
 | 补交后历史混乱 | 每次提交生成独立 submission round | 会计统一切换轮次，旧文件和决定仍可追溯 |
 | 多文件关系复杂 | requirement 与 document 多对多，保存 evidence relation | 支持多发票对一笔付款、历史发票和当前付款等场景 |
-| AI 结论不可控 | Backend 校验 Agent 输出，整单批准始终人工 | 非法 evidence、低置信度或错误金额关系转人工 |
+| AI 结论不可控 | Backend 校验 Agent 输出，整单批准始终人工 | 非法 evidence、证据不足或错误金额关系转人工 |
 | 多客户数据泄漏风险 | firm/client 作用域授权和复合外键 | 猜测其他客户资源 ID 无法读取或关联 |
 | 操作重复或并发冲突 | Idempotency-Key、版本号和行锁 | 重复请求不产生重复事件，旧版本写入返回冲突 |
 
@@ -349,7 +349,7 @@ sequenceDiagram
     API->>DB: submission=SUBMITTED, request=IN_REVIEW
     API->>DB: 创建 REVIEW run（OFF 除外）
     Worker->>DB: 领取 run 租约
-    Worker->>Agent: purpose=REVIEW, turn=0
+    Worker->>Agent: purpose=REVIEW, review_preference, turn=0
     Agent->>Model: 完整文件 + 上下文
     Model-->>Agent: finding 或 SEARCH action
     alt 需要搜索
@@ -357,8 +357,8 @@ sequenceDiagram
         Worker->>Agent: 下一 turn + 搜索结果
     end
     Agent-->>Worker: extractions + findings + evidence
-    Worker->>Worker: 校验 ID、归属、置信度和 Decimal
-    alt 任一高置信度 REQUEST_ACTION
+    Worker->>Worker: 校验 ID、归属、补交证据和 Decimal
+    alt 任一可核对的 ASK_CLIENT
         Worker->>DB: 单项 NEEDS_ACTION + 整单 CHANGES_REQUESTED
     else 全部可自动满足
         Worker->>DB: 单项 SATISFIED，整单保持 IN_REVIEW
@@ -674,9 +674,9 @@ app/models.py              业务数据模型与数据库约束
 | --- | --- |
 | `OFF` | 不创建提交后 REVIEW run |
 | `SUGGEST` | 保存并展示分析，始终由会计决定 |
-| `AUTO_REVIEW` | 通过 Backend 校验并达到请求阈值后，可自动满足或退回单项 |
+| `AUTO_REVIEW` | Agent 按请求审核偏好建议动作，Backend 校验后可自动满足或退回单项 |
 
-新请求默认 `AUTO_REVIEW`，满足和退回阈值均为 `0.980`。前端以“更偏自动 / 平衡处理 / 更偏人工”等文字选项呈现，不让普通用户直接理解抽象小数。
+新请求默认 `AUTO_REVIEW + STANDARD`。`review_preference` 可选 `CAUTIOUS | STANDARD | EFFICIENT`，指导模型在“明确补交”与“转会计审核”之间分流，不改变事实判断、证据要求或人工整单批准。旧阈值字段只作历史兼容，不再控制自动决定。
 
 ### 16.3 自动执行边界
 
@@ -684,12 +684,14 @@ app/models.py              业务数据模型与数据库约束
 
 - 请求为 `AUTO_REVIEW`；
 - 建议是 `SATISFY` 或 `REQUEST_ACTION`；
-- confidence 达到该请求对应阈值；
+- `ASK_CLIENT` 指向明确问题；主体/期间不符有矛盾证据，缺失/不完整事项先搜索，模糊或不可读事项转人工；
 - evidence 属于同事务所、同客户和有效提交；
 - 所有 ID、枚举和 schema 合法；
 - 金额关系通过 Backend `Decimal` 重算；
 - 当前资料项仍处于可应用状态；
 - finding 不是 `ESCALATE`。
+
+REVIEW finding 不包含模型自报的 `confidence`；旧审核记录的该字段在对外读取时过滤。偏好属于 Agent 的行为指引，Backend 仍拥有最终状态迁移权；该机制在真实材料上的误退回率尚需单独验证。
 
 任一自动 `REQUEST_ACTION` 会把整单退回客户。全部单项自动通过时，整单保持 `IN_REVIEW` 并显示“待人工确认”。
 
@@ -929,7 +931,7 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 
 ### 21.3 尚未完成的质量验证
 
-- 真实模型准确率、召回率、置信度校准和财务专业评估；
+- 真实模型准确率、召回率、上传分类置信度校准和财务专业评估；
 - 正式性能、压力和长时间稳定性测试；
 - 独立渗透测试、依赖漏洞门禁和恶意文件专项测试；
 - 备份恢复、主机故障和磁盘耗尽演练；
@@ -940,7 +942,7 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 
 | 风险 | 影响 | 当前控制 | 后续措施 |
 | --- | --- | --- | --- |
-| 模型误判 | 错误退回或错误满足资料项 | 双阈值、evidence、Decimal 重算、人工整单确认 | 真实数据评估、阈值校准、持续抽检 |
+| 模型误判 | 错误退回或错误满足资料项 | evidence、补交证据门槛、Decimal 重算、人工整单确认 | 真实数据评估误退回率、持续抽检 |
 | 模型不可用 | AI 分类/审核延迟 | Provider 可关闭，人工流程独立 | 模型 SLA、超时监控和降级告警 |
 | 单机故障 | 整体服务暂时不可用 | 持久卷、不可变镜像 | 托管数据库、对象存储、备份恢复 |
 | 本地文件丢失 | 财务资料不可恢复 | 命名卷 | 加密快照、异地备份和恢复演练 |
@@ -1016,4 +1018,3 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 | Backend | `49c5db2` |
 | Agent runtime | `9431411`；后续 `839263e` 仅更新说明文字 |
 | Docs | 本文生成前基线 `b6bfe0a` |
-
