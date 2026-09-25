@@ -432,7 +432,7 @@ B6.1/A1 记录保留为历史技术检查，本次向用户交付页面功能，
 
 上文 B6.1–B6.4 的阈值描述保留为当时验收记录；当前代码使用 `0015_review_preference` 增加 `review_preference=CAUTIOUS|STANDARD|EFFICIENT`。旧双阈值仍留在 API/数据库中供历史兼容，迁移时按原自动退回档位映射，但不再参与审核状态迁移。创建、修改、复制草稿均保存文字偏好；提交时把偏好写入 REVIEW run 输入快照并传给 Agent。REVIEW finding 不接受 `confidence`；读取旧 run 时对外过滤该字段，历史数据库记录不改写。
 
-Agent 依偏好选择 `ASK_CLIENT`、`RESOLVE` 或 `ESCALATE`；Backend 仍校验 ID、租户/客户证据、金额。主体/期间不符必须带最新提交轮次的 `CONTRADICTS` 证据和对应 `MISMATCH` 检查，不能拿旧轮次错误文件覆盖新更正件；缺失/不完整项须先搜索。不可读或笼统 `OTHER` 问题不自动退回。`SUGGEST` 不产生 AI 决定，`AUTO_REVIEW` 对可核对的明确问题自动退回，对 AI 通过项标记满足，整单仍由会计确认。此改动已通过本地自动检查；真实材料误退回率与页面验收尚未完成，不宣称生产准确率。
+Agent 依偏好选择 `ASK_CLIENT`、`RESOLVE` 或 `ESCALATE`；Backend 仍校验 ID、租户/客户证据、金额。主体/期间不符必须带最新提交轮次的 `CONTRADICTS` 证据和对应 `MISMATCH` 检查，不能拿旧轮次错误文件覆盖新更正件；缺失/不完整项须先搜索，并用 `requested_document_type` 声明客户实际需要上传的类型。Backend 拒绝把 `REQUEST_ACTION` 写到其他资料项，例如缺发票不能写成补交银行对账单；清单中不存在目标类型时同样拒绝自动决定并转人工。不可读或笼统 `OTHER` 问题不自动退回。`SUGGEST` 不产生 AI 决定，`AUTO_REVIEW` 对可核对的明确问题自动退回，对 AI 通过项标记满足，整单仍由会计确认。此改动已通过本地自动检查；真实材料误退回率与页面验收尚未完成，不宣称生产准确率。
 
 ## 10. 阶段验收记录模板
 

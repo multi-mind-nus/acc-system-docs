@@ -143,7 +143,7 @@ Agent 能使用完整文件返回最小分类 schema，对远端模型的额外�
 SEARCH_CURRENT | SEARCH_HISTORY | ASK_CLIENT | RESOLVE | ESCALATE
 ```
 
-finding 至少包含 `requirement_id`、`action`、`suggested_decision`、`issue_code`、`evidence[]` 和面向客户的 `client_message`。REVIEW finding 不包含 `confidence`；多余字段将被拒绝。金额关系使用十进制字符串：
+finding 至少包含 `requirement_id`、`action`、`suggested_decision`、`issue_code`、`evidence[]` 和面向客户的 `client_message`。`MISSING/INCOMPLETE` 还必须用 `requested_document_type` 指明客户需要上传的资料类型；补交 finding 必须归到清单中同类型的 requirement，不存在对应资料项或归属错误时拒绝自动补交并转人工。REVIEW finding 不包含 `confidence`；多余字段将被拒绝。金额关系使用十进制字符串：
 
 ```json
 {
@@ -180,7 +180,7 @@ G02、G03、B01、B03、F02、F04 和 F05 的固定模型桩联合验收通过�
 
 - REVIEW 使用独立严格 schema；完整文件读取、路径/MIME/SHA-256 校验和响应上限与 CLASSIFY 一致。协议定义为 `app/analysis_schemas.py`，Backend 保存同一契约，所有 JSON 仍为 snake_case。
 - 接受 context（主体/期间/提交 id）、内部 requirements、文件与资料项关联、CURRENT/HISTORY 范围、turn 和 search_history。最终响应要求每文件一份 extraction、每资料项一份 finding；搜索响应不能混入最终 finding。
-- finding 包含 action、suggested_decision、issue_code、置信度、主体/期间检查、解释、客户建议、evidence 和金额关系；动作限定 SEARCH_CURRENT/SEARCH_HISTORY/ASK_CLIENT/RESOLVE/ESCALATE，不接受 WAIVE/APPROVE。
+- finding 包含 action、suggested_decision、issue_code、requested_document_type、主体/期间检查、解释、客户建议、evidence 和金额关系；动作限定 SEARCH_CURRENT/SEARCH_HISTORY/ASK_CLIENT/RESOLVE/ESCALATE，不接受 WAIVE/APPROVE，也不包含审核 confidence。
 - 金额十进制字符串支持 SUM/SUBTRACT/MULTIPLY，每个 operand 带 document_id、amount、label；用于合计、扣款、汇率换算等关系，Backend 再独立校验。Agent 不执行搜索或业务状态修改。
 - `REVIEW_PROVIDER=DISABLED|MOCK|REMOTE`，Compose 对应 `AGENT_REVIEW_PROVIDER`。MOCK 仅非生产使用，文件名 G02/G03/B01/B03/F02/F04/F05 选择固定样例，返回 `mock-reviewer-v1`。模拟的主体/期间/交易/金额仅验证页面与协议，不是真实提取；普通文件返回未知字段并 ESCALATE，不臆造识别结果。
 - REMOTE 复用 Bearer 完整文件 JSON transport；真实模型协议仍待提供。单进程最近 128 结果缓存，相同 run:turn 返回一致响应，冲突内容拒绝，重启/多副本依赖远端幂等键与 Backend 持久化去重。
@@ -193,6 +193,8 @@ G02、G03、B01、B03、F02、F04 和 F05 的固定模型桩联合验收通过�
 - 新增 `DEEPSEEK` provider。图片及 PDF 的每一页先经 Novita `deepseek/deepseek-ocr-2` 识别，再把 OCR 文本交给 Novita Flash。初始联调使用 V4，现行默认模型为 `deepseek/deepseek-v4.1-flash`；两次调用均使用其 OpenAI 兼容 Chat Completions。Agent 不部署模型权重，也不连接业务数据库。
 - `CLASSIFY` 只产生类别、目标资料项和分类置信度；`REVIEW` 产生提取、finding、evidence、搜索动作和金额关系，不包含 `confidence`。模型输出继续经过严格 schema 校验，Backend 继续负责授权搜索、Decimal 重算和业务状态。OCR 失败、截断或未配置时必须显式失败，不能以文件名模拟结果冒充真实审核。
 - Compose 用 `NOVITA_API_KEY` 为 OCR 与 Flash 提供同一凭据；可选 `OCR_*` 和 `MODEL_*` 覆盖各自 URL、模型与凭据。默认地址均为 `https://api.novita.ai/openai/v1/chat/completions`。初始接入时真实端到端测试尚未完成，后续选定样本结果见 7.1；密钥不保存在仓库或文档。
+- REVIEW 调用启用 V4.1 Flash 的普通 Thinking（`reasoning.effort=low`），用于提升复杂证据关系和严格 JSON 输出的稳定性；上传 CLASSIFY 保持 Non-thinking，以维持快速分类。Thinking 不能替代 schema 与 Backend 证据校验。
+- REVIEW 单轮 OCR 与推理共享 290 秒预算，Backend 等待 300 秒并持有 330 秒任务租约；CLASSIFY 仍使用 150 秒预算。预算增加用于容纳 Thinking，不改变最多三轮搜索或失败重试规则。
 - 新增 `POST /v1/analyze-inline`：以 `content_base64` 代替共享卷路径，使用 `AGENT_API_KEY` Bearer 鉴权；两种 purpose 使用同一输入/输出业务协议。面向外部复用时需置于 HTTPS、限流和可信网关之后。原 `/v1/analyze` 保持 Folio 内网接口。
 - 新增测试覆盖 PNG 与真实 PDF 页渲染、OCR 先于 Flash、OCR 文本而非原始二进制进入 Flash、独立 API 鉴权、校验和、审核 ESCALATE。仍需用 Novita 实际调用及 G02/G03/B01/B03/F02/F04/F05 材料做准确率和延迟验收。
 - 初始接入验证记录：49 个自动测试通过，Agent Docker 镜像构建通过；Novita 真实调用已跑通图片 OCR→分类、图片 OCR→审核、G02 错期间 PDF（`ASK_CLIENT/WRONG_PERIOD`）和 G03 错主体 PDF（`ASK_CLIENT/ENTITY_MISMATCH`）。G03 曾有一次结构不合约的输出被拒绝；调整提示后重测通过。该记录不代表后续样本或稳定准确率的验收状态。
@@ -207,6 +209,13 @@ G02、G03、B01、B03、F02、F04 和 F05 的固定模型桩联合验收通过�
 - V4.1 Flash 的多文件 REVIEW 将输出预算从 8192 提到 16384；输出截断仍被拒绝，不返回半份 JSON。修正请求只包含简短校验错误，不回灌完整错误响应。`SATISFY` 除算式自洽外，还要求每步金额差额不超过半分舍入容差；Backend 独立检查这一点。
 - 用 `REVIEW_PROVIDER=DEEPSEEK uv run python -m scripts.evaluate_v5 --phase trajectory <case_dir>` 可复现多轮流程；ground truth 仅用于评价，不发给模型。使用 V4.1 Flash 且不向模型传文件名，选定六个样本各有一次完整轨迹通过：G02_0026/G03_0055 错材料退回后补交通过；B01_0850/B03_1822/F04_0903/F05_0249 完成搜索/补交后的 `RESOLVE/SATISFY`，最终 evidence 文件集合和金额关系符合答案。F04/F05 包含干扰材料，未被引用。B03 的登记表必须与所引用发票编号匹配且被列入证据。
 - 历史测试时 Agent 60 passed，Backend 新增搜索/文件类型/金额差额单元测试 3 passed。F02 和全数据集尚未评价；随机输出稳定性、延迟、成本及生产联调未验收。当时模型给出的 G02 更正件 0.95、B01 齐件 0.97 会因旧请求阈值转人工；当前已取消该自报分数门槛，一次样本通过仍不等于生产可自动放行。
+
+### 7.2 报销收据证据覆盖回归
+
+- 通用规则：`EXPENSE_CLAIM` 的每个报销行必须有不同的原始 `RECEIPT` 文件支持；报销单本身不是收据。自动满足相关资料项时，报销单行项目、总额、收据提取金额和 `SUM` operands 必须一致，相关 finding 必须引用完整证据链。Agent 和 Backend 使用同一校验契约，避免模型自称通过就写入审核决定。
+- 当前资料搜索后，若具体缺失材料已明确，就形成 `ASK_CLIENT/INCOMPLETE`；不再为了已明确的当期补交事项强制查历史。证据仍不清楚或可能涉及上期义务时，历史搜索和人工升级仍可用。
+- 使用 F02_0002 的实际 PDF 与三项必交资料模拟真实请求：缺第二张收据时，真实 Novita OCR→Flash 返回搜索当前资料，随后银行对账单与报销单使用 `ESCALATE/INCOMPLETE` 等待支持，只有收据项使用 `ASK_CLIENT/INCOMPLETE`，且 `requested_document_type=RECEIPT`；补齐后一次真实调用返回三项 `SATISFY`，两张收据分别匹配两笔报销并作为合计 operands。一次补齐材料调用曾输出截断并超时，不能据此声称随机稳定性或生产时延已验收。测试不在生产规则里使用 case ID、文件名或答案。
+- 跨资料项补交规则：银行对账发现缺发票时，银行 finding 使用 `ESCALATE` 等待支持，发票 finding 使用 `ASK_CLIENT`，不能把补交动作挂在银行单上并同时满足发票项。B01_0850 缺一张发票的真实 OCR→Flash 回归得到银行 `ESCALATE/INCOMPLETE`、发票 `ASK_CLIENT/MISSING`；后端状态测试确认只有发票项进入 `NEEDS_ACTION`。
 
 ## 8. 阶段验收记录模板
 

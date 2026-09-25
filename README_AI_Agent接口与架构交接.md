@@ -321,6 +321,7 @@ Remote Model 实际收到的 document 使用 `content_base64`：
       "period_check": "MATCH",
       "explanation": "The submitted invoice matches the requested entity and period.",
       "client_message": null,
+      "requested_document_type": null,
       "evidence": [
         {
           "document_id": "66666666-6666-4666-8666-666666666666",
@@ -370,7 +371,7 @@ Remote Model 实际收到的 document 使用 `content_base64`：
 
 | `action` | `suggested_decision` | 必要条件 |
 | --- | --- | --- |
-| `ASK_CLIENT` | `REQUEST_ACTION` | 必须有 `issue_code` 和可直接展示给客户的 `client_message` |
+| `ASK_CLIENT` | `REQUEST_ACTION` | 必须有 `issue_code` 和可直接展示给客户的 `client_message`；`MISSING/INCOMPLETE` 还必须有 `requested_document_type` |
 | `RESOLVE` | `SATISFY` | 必须有 evidence，`issue_code=null` |
 | `ESCALATE` | `null` | 交给会计判断，不得伪造通过或退回结论 |
 
@@ -380,6 +381,8 @@ Remote Model 实际收到的 document 使用 `content_base64`：
 - `entity_check` / `period_check`：`MATCH | MISMATCH | UNKNOWN`；
 - `evidence.relation`：`SUPPORTS | CONTRADICTS | REFERENCE`；
 - 金额操作：`SUM | SUBTRACT | MULTIPLY`。
+
+发现问题的资料项不一定是客户需要补交的资料项。例如银行对账发现发票金额不足时，银行资料项返回 `ESCALATE` 表示等待支持材料，`ASK_CLIENT/REQUEST_ACTION` 必须使用现有 `SUPPLIER_INVOICE` requirement 的 ID，并设置 `requested_document_type=SUPPLIER_INVOICE`。Agent 与 Backend 都会拒绝把补交动作挂到其他 requirement；若清单没有对应类型，也会拒绝该自动补交决定并转人工处理，不能把动作挂回发现问题的资料项。
 
 金额必须是十进制字符串，格式为：
 
@@ -414,6 +417,8 @@ Remote Model 只给出建议；实际执行规则由 Backend 决定：
 审核偏好只调整 `ASK_CLIENT` 与 `ESCALATE` 的分流，不得降低事实或证据要求。REVIEW finding 不包含 `confidence`；Agent 若返回该字段，Backend 将拒绝该响应。历史审核记录在对外读取时会过滤旧字段，不改写数据库原始记录。上传 CLASSIFY 的分类置信度仍保留。
 
 ## 8. 错误、幂等和安全
+
+REVIEW 调用使用 `reasoning.effort=low` 开启普通 Thinking；CLASSIFY 不传 `reasoning`，保持 Non-thinking。无论是否开启 Thinking，模型输出都必须通过相同的 schema、证据归属和金额重算校验。
 
 Agent 错误结构固定为：
 
@@ -504,7 +509,15 @@ Agent 错误结构固定为：
 - 现行默认请求模型是 [Novita 列出的 `deepseek/deepseek-v4.1-flash`](https://novita.ai/models/model-detail/deepseek-deepseek-v4.1-flash)，不是由模型回答决定；多文件 REVIEW 的输出预算为 16384 tokens，仍受 170 秒 Agent 分析时限约束，截断响应不能作为审核结论。
 - 审核模型不接收 `original_name`，避免客户文件名或数据集里带有 `wrong/correct` 的文件名充当答案线索；Backend/Agent 仍保留原文件名用于存储和页面展示。
 - 对补交轮次，按 `submission_round` 判断当前有效材料；保留上一轮错误文件作审计线索，但不让它覆盖新一轮更正。旧输入快照缺少该字段时为 `null`，不能臆断新旧顺序。
-- 银行交易审核若缺支持材料，先请求 Backend 搜索当前资料，再搜索历史资料；搜索只由 Backend 执行并保持事务所/客户权限边界。若搜索过滤条件过窄且没有命中，Backend 在同一授权范围内做一次宽松回退。找到资料后引用完整证据链，不把未结清项目登记表单独视为发票原件。
+- 银行交易审核若缺支持材料，先请求 Backend 搜索当前资料；若仍无法确定补交内容且上期义务可能相关，再搜索历史资料。当前资料搜索后已能明确要求客户补交时，不额外强制历史搜索。搜索只由 Backend 执行并保持事务所/客户权限边界；过滤条件过窄且没有命中时，在同一授权范围内做一次宽松回退。找到资料后引用完整证据链，不把未结清项目登记表单独视为发票原件。
 - `RESOLVE` 的金额关系由 Agent 按十进制数复算；外币证据须有结构化换汇乘法，保留未四舍五入的乘积和与结算金额的差额。`SATISFY` 的每步金额差额最多允许半分舍入；Backend 独立复算、检查差额与证据归属，不能把“算式自洽但目标不相等”自动批准。无效模型输出最多要求修正两次，反馈只带校验错误类型，不把完整错误响应塞回上下文；仍无效则转人工。
 - 选定 v5 样本使用真实 Novita OCR→V4.1 Flash、移除模型输入文件名后运行完整轨迹：G02_0026 错期间、G03_0055 错主体均先退回，补交正确材料后通过；B01_0850 多发票、B03_1822 上期资料、F04_0903 外币及手续费、F05_0249 进度款及保留款均在搜索或补交后得到 `RESOLVE/SATISFY`。六个最终结果的 evidence 文件集合与样本答案一致，金额关系核对正确，干扰材料未被引用。验证使用 `scripts/evaluate_v5.py`，答案只用于结果比对，未进入模型请求；生产规则无 case ID、文件名或答案特判。
 - 这些结果是选定样本各一次成功运行，不代表随机模型输出已稳定，也未证明 2000 个 case 全部通过。评估脚本模拟了文件可见性和多轮搜索，尚不等于真实数据库权限与页面端到端验收。历史测试时 G02 更正件曾返回 0.95、B01 齐件曾返回 0.97；这些自报分数没有校准基准，当前执行逻辑已取消按请求阈值比较，不能把“样本结论正确”等同于“已自动批准”。当前代码变更未因此自动发布到生产。
+
+### 11.2 报销单与原始收据的独立证据规则
+
+报销单的行项目和总额是待验证主张，不能充当自己的原始收据。若请求中有报销单，Agent 需提取全部报销行，逐行匹配不同的收据文件（金额及币种），并核对行项目合计等于报销单总额。自动满足相关资料项时，finding 必须引用报销单及所有匹配收据；报销单的 `SUM` 关系必须以原始收据文件为 operand，且 operand 金额须与对应收据提取值一致。Agent 与 Backend 均校验这条规则；不合约的 `SATISFY` 不能产生自动审核决定。无法识别行项目或无法定位缺失支持时转人工；明确缺少的材料先搜索当前资料，仍未找到则用 `ASK_CLIENT/INCOMPLETE` 请求补交。
+
+F02_0002 的一次真实 OCR→Flash 回归：仅提交银行对账单、报销单和第一张收据时，当前资料搜索后，银行对账单与报销单返回 `ESCALATE/INCOMPLETE` 等待支持，只有收据项返回 `ASK_CLIENT/INCOMPLETE`，且 `requested_document_type=RECEIPT`；补齐第二张收据后，三项均返回 `SATISFY`，报销单金额关系的两个 operand 分别引用两张收据。另有一次补齐材料的模型输出被截断并超时，因此该结果仅证明具体正反样本可通过，不代表模型调用时延或随机稳定性已达生产验收标准。规则本身不引用 case ID、文件名或标准答案。
+
+B01_0850 的资料项归属回归使用银行单和三张已提交发票、模拟一次当前资料搜索未找到剩余发票：银行资料项返回 `ESCALATE/INCOMPLETE`，发票资料项返回 `ASK_CLIENT/MISSING`，并以 `requested_document_type=SUPPLIER_INVOICE` 要求补交差额 SGD 3,273.26 的发票。后端测试确认整单进入补交、银行项保持 `RECEIVED`、发票项进入 `NEEDS_ACTION`，审核决定只写入发票项。

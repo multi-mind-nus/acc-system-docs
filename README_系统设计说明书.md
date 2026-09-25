@@ -350,7 +350,7 @@ sequenceDiagram
     API->>DB: 创建 REVIEW run（OFF 除外）
     Worker->>DB: 领取 run 租约
     Worker->>Agent: purpose=REVIEW, review_preference, turn=0
-    Agent->>Model: 完整文件 + 上下文
+    Agent->>Model: 文件先 OCR，再送 OCR 文本与上下文
     Model-->>Agent: finding 或 SEARCH action
     alt 需要搜索
         Worker->>DB: 按事务所/客户范围搜索
@@ -366,6 +366,10 @@ sequenceDiagram
         Worker->>DB: 保留人工审核
     end
 ```
+
+报销单的合计只是待验证主张。对于含报销单的审核，自动满足前还须证明每笔报销行都有不同的原始收据，收据金额、币种和报销合计一致，并在审核证据及结构化金额关系中引用这些收据。Agent 与 Backend 双重校验；缺失收据经当前资料搜索仍未找到时可明确退回补交，校验失败或无法定位缺口时留给会计复核。
+
+补交动作按“客户需要上传什么”归属，而不是按“哪个分析发现问题”归属。银行对账发现支持发票不足时，银行资料项保持待审核，发票资料项进入 `NEEDS_ACTION`。`MISSING/INCOMPLETE` finding 通过 `requested_document_type` 声明补交类型；Agent 和 Backend 会拒绝错误归属，目标类型不在清单中时也不自动退回，而是交由会计处理。
 
 ### 10.5 会计审核与整单确认
 
