@@ -434,6 +434,8 @@ B6.1/A1 记录保留为历史技术检查，本次向用户交付页面功能，
 
 Agent 依偏好选择 `ASK_CLIENT`、`RESOLVE` 或 `ESCALATE`；Backend 仍校验 ID、租户/客户证据、金额。主体/期间不符必须带最新提交轮次的 `CONTRADICTS` 证据和对应 `MISMATCH` 检查，不能拿旧轮次错误文件覆盖新更正件；缺失/不完整项须先搜索，并用 `requested_document_type` 声明客户实际需要上传的类型。Backend 拒绝把 `REQUEST_ACTION` 写到其他资料项，例如缺发票不能写成补交银行对账单；清单中不存在目标类型时同样拒绝自动决定并转人工。不可读或笼统 `OTHER` 问题不自动退回。`SUGGEST` 不产生 AI 决定，`AUTO_REVIEW` 对可核对的明确问题自动退回，对 AI 通过项标记满足，整单仍由会计确认。此改动已通过本地自动检查；真实材料误退回率与页面验收尚未完成，不宣称生产准确率。
 
+客户对 AI 自动退回有异议时，可在下一轮提交中设置 `manual_review_requested=true`。Backend 仅在上一轮存在 AI `REQUEST_ACTION` 决定时接受该选项；客户无需为提出异议重复上传相同文件，系统把上一轮仍有效的资料关联到新的 submission。该轮仍进入 `IN_REVIEW`，但不创建 REVIEW run，派生状态直接为 `AWAITING_ACCOUNTANT`。提交事件和会计通知携带人工复审标记，会计使用原有单项审核和整单确认流程处理，历史 AI 决定保持可追溯。迁移 `0016_manual_review_request` 为 submission 保存该标记。
+
 ## 10. 阶段验收记录模板
 
 每完成一个阶段，在 issue/release 中保存：
