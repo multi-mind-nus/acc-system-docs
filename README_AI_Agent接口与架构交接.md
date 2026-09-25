@@ -2,6 +2,10 @@
 
 ## 1. 交付目标
 
+REVIEW 公司上下文补充（2026-09-25）：`context` 增加 `industry`、`base_currency`、`features` 和 `bank_accounts`，由 Backend 在提交时从该事务所的客户档案生成并存入 run 快照，重试及搜索轮次沿用同一快照。银行账户仅包含当前客户的启用账户（银行名称、尾四位、币种）。Agent 将上下文随请求传给远端模型，不另查数据库。兼容旧 run：前三个字段缺失时为 `null`，账户列表为空，表示上下文未提供，不代表公司没有相关业务或银行账户；不得据此虚构结论。`features` 仅包含系统维护的六项特征，没有 `has_employees`。行业编码为 `PROFESSIONAL_SERVICES / ONLINE_COMMERCE / PROJECT_ENGINEERING / TRADING_DISTRIBUTION / FOOD_BEVERAGE / SOFTWARE_SAAS / OTHER`。上传 CLASSIFY 协议不增加这些审核字段。
+
+资料类型补充（2026-09-25）：创建请求支持 `BANK_STATEMENT`、`SALES_INVOICE`、`PURCHASE_INVOICE`、`RECEIPT`、`CREDIT_NOTE`、`SALES_REPORT`、`PAYMENT_PLATFORM_REPORT`、`SETTLEMENT_REPORT`、`PAYROLL_REPORT`、`EXPENSE_CLAIM`、`LOAN_STATEMENT`、`FX_ADVICE`、`PROGRESS_CLAIM`、`PAYMENT_CERTIFICATE`、`OPEN_ITEMS_REGISTER`、`OTHER`。v5 数据集的 `SUPPLIER_INVOICE` 对应系统的 `PURCHASE_INVOICE`；模型适配时须处理该映射，其余数据集类型保持同名。`PAYMENT_PLATFORM_REPORT` 是保留的综合平台报表类型，`SETTLEMENT_REPORT` 表示具体结算报告。此补充仅覆盖材料类别，不表示所有 case 的交易审核逻辑均已实现。
+
 本文交给负责模型和 AI 服务的开发人员，说明训练完成的模型怎样接入资料收集系统。当前系统已经包含 `acc-system-agent` 适配层；推荐保留它，只实现远端模型服务，而不是在模型服务中复制业务状态机。
 
 ```text
@@ -210,7 +214,18 @@ Remote Model 实际收到的 document 使用 `content_base64`：
   "context": {
     "entity_name": "Example Pte. Ltd.",
     "period": "2027-08-01",
-    "submission_id": "55555555-5555-4555-8555-555555555555"
+    "submission_id": "55555555-5555-4555-8555-555555555555",
+    "industry": "TRADING_DISTRIBUTION",
+    "base_currency": "SGD",
+    "features": {
+      "uses_payment_platform": false,
+      "has_employee_reimbursement": true,
+      "has_loan": true,
+      "multi_currency": true,
+      "project_based": false,
+      "has_retention": false
+    },
+    "bank_accounts": [{"bank": "DBS", "account_last4": "1234", "currency": "SGD"}]
   },
   "documents": [
     {

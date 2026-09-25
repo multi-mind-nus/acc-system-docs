@@ -2,6 +2,10 @@
 
 ## 1. 文档用途
 
+状态简化（2026-09-25）：移除“已关闭”及关闭操作，正常完成统一为“已确认”，中途作废为“已取消”。迁移 `0014_retire_closed` 将旧 `CLOSED` 请求合并为 `READY_FOR_BOOKKEEPING`，保留历史事件；关闭接口不再提供。此规则替代下文历史阶段的关闭步骤。
+
+当前规则更新（2026-09-25）：一个数据集 case 对应一个独立收集请求。同一客户、同一期间允许创建或复制多个请求，各自维护资料、提交轮次和审核状态；取消原有期间冲突预检查、接口拦截和数据库唯一索引（迁移 `0013_multiple_period_requests`）。相同幂等键重试仍返回原请求。此规则替代下文历史阶段中同客户同期间唯一的约束与验收描述。
+
 本文把[系统架构设计](./README_系统架构设计.md)拆成可执行的后端开发阶段。每个阶段必须独立可部署、可验证；未通过当前阶段验收，不进入下一阶段。
 
 后端仓库：`acc-system-backend`
@@ -404,7 +408,8 @@ B6.1/A1 记录保留为历史技术检查，本次向用户交付页面功能，
 - Backend-Agent REVIEW 的严格 snake_case 协议见两个仓库一致的 `app/analysis_schemas.py`。最终结果必须覆盖全部输入资料项/文件，未知 id、跨客户/事务所证据、非法枚举和非十进制金额拒绝；每个金额操作数必须关联 evidence 文件。
 - `SUM/SUBTRACT/MULTIPLY` 使用高精度 Decimal 重算 actual 和 difference；不一致记录 `AMOUNT_MISMATCH`，低于请求阈值记录 `LOW_CONFIDENCE`。算术通过不等于原始凭证真实或财务结论成立。
 - 成功后持久化模型版本、提取字段、findings、证据和搜索轮次；不改 requirement/collection 审核状态，不创建 ReviewDecision 或 Outbox。本批仅分析建议；B6.4 再启用自动决定与人工显式 evidence。
-- 员工 `GET /collection-requests/{id}/review-runs` 查询（不返回 storage_key 或输入快照）；`POST /collection-requests/{id}/review-runs/{run_id}/retry` 仅重试当前提交失败 run，保留旧记录并复用正在处理的新 run。客户端只返回 PROCESSING/AWAITING_ACCOUNTANT。
+- 员工 `GET /collection-requests/{id}/review-runs` 查询（不返回 storage_key 或输入快照）；`POST /collection-requests/{id}/review-runs/{run_id}/retry` 仅重试当前提交失败 run，保留旧记录并复用正在处理的新 run。
+- 客户端和会计端统一使用派生 `review_status`：`PROCESSING` 显示“AI 审核中”；`AI_NEEDS_REVIEW`、`AI_FAILED`、`AWAITING_ACCOUNTANT` 合并显示“待人工审核”；`AI_PASSED` 显示“待人工确认”。内部保留不同原因，供详情说明和重试使用。界面状态筛选的审核类仅保留“审核中”（`IN_REVIEW`），覆盖所有审核子状态，其他业务状态筛选保留。客户仅看到公开状态说明，不返回内部模型输出或失败详情。客户端轮询同步整单状态与资料清单，自动退回后可直接补交。
 - 无新增数据库迁移，使用 `0010_classification_confirmation`。本地镜像 `b6.3-a3-local`；`AGENT_REVIEW_PROVIDER=MOCK`，生产默认 DISABLED 且禁止 MOCK。未提交、未发布线上。
 - 用户验收覆盖 AI 分析状态、单项建议一键填写、审核结论重新编辑、全部资料审核完成前禁止下一步、旧补交请求中未审核资料的兼容恢复，以及底部浮动审批操作条。
 - 自动检查：Backend **52 passed**，Agent **33 passed**，Frontend **49 passed**，前端 lint/类型检查/构建通过；覆盖超时重试、旧租约、迟到结果、金额差错、三轮搜索上限、跨客户/事务所隔离、OFF 模式、轮次切换和展示转义。

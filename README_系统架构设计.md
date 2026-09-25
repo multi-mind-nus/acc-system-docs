@@ -503,7 +503,7 @@ Idempotency-Key: <ai_run_id>:<turn>
 
 搜索轮响应的 `findings` 必须为空，`search` 包含 `action`、`requirement_id` 以及可选 `document_type/period/query/amount/currency`；Backend 执行租户/客户限定搜索并增加下一轮输入。最终结果必须覆盖每个输入文件和资料项。金额关系使用 `SUM/SUBTRACT/MULTIPLY`，每个 operand 为 `{document_id, amount, label}`，强制关联证据。实际严格定义见 Backend/Agent 同步的 `app/analysis_schemas.py`。
 
-**当前实现边界（B6.4/F7.3，2026-09-23，待用户验收）**：已接通提交后分析、最多三轮搜索、证据验证、Decimal 重算、高置信度问题自动退回、通过项自动满足和整轮人工确认、人工显式 evidence 与 `SUPPRESSED` Outbox。`SUGGEST` 只保存建议，`OFF` 不创建 REVIEW；豁免和整单批准保持人工。开发环境使用 `AGENT_REVIEW_PROVIDER=MOCK` 固定案例，生产禁止模拟；真实模型协议尚待提供，不能把模拟结果当作文件真实提取或模型准确率验证。
+**当前实现边界（B6.4/F7.3，2026-09-24，用户验收通过）**：已接通提交后分析、最多三轮搜索、证据验证、Decimal 重算、高置信度问题自动退回、通过项自动满足和整轮人工确认、人工显式 evidence 与 `SUPPRESSED` Outbox。`SUGGEST` 只保存建议，`OFF` 不创建 REVIEW；豁免和整单批准保持人工。开发环境使用 `AGENT_REVIEW_PROVIDER=MOCK` 固定案例，生产禁止模拟；真实模型协议尚待提供，不能把模拟结果当作文件真实提取或模型准确率验证。
 
 ## 11. 前端设计
 
@@ -757,6 +757,7 @@ CI 只构建和推送，不直接 SSH 生产服务器。需要自动部署时，
 
 ## 17. 开发执行文档
 
+- [系统设计说明书](./README_系统设计说明书.md)：最终交付和汇报使用的业务、架构、数据、安全、部署、验收与风险总说明；
 - [后端开发文档](./README_后端开发文档.md)：B1-B6 的交付内容、阶段验收场景和完成标准；
 - [前端开发文档](./README_前端开发文档.md)：F1-F7 的页面交付、接口依赖、阶段验收场景和完成标准；
 - [Agent 开发文档](./README_Agent开发文档.md)：A1-A3 的服务基线、快速分类、完整审核和验收场景；
