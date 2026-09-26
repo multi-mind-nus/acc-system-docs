@@ -1,8 +1,10 @@
-# 会计事务所资料收集系统 - 系统架构设计
+# Folio - 系统架构设计
 
 ## 1. 目标与范围
 
 本系统服务于会计事务所的月度资料收集流程：客户经理创建收集请求，客户上传资料，会计人员审核并要求补交，直到该月份达到 `READY_FOR_BOOKKEEPING`。
+
+本文记录截至 2026-09-26 的当前架构；已部署版本、交付范围和待办项详见 [系统设计说明书](./README_系统设计说明书.md)。以下阶段编号保留开发过程的规划与验收脉络，不代表仍使用早期 MOCK 模型。
 
 MVP 必须完成：
 
@@ -29,6 +31,8 @@ MVP 必须完成：
 
 ## 3. 总体架构
 
+汇报图：[系统总览](./Folio_系统架构与技术栈.html) · [前端](./Folio_前端架构.html) · [后端](./Folio_后端架构.html) · [AI Agent](./Folio_AI_Agent架构.html)。各图为可离线打开的独立 HTML；服务图中的容器边界与细分图中的内部模块边界分别标注。
+
 ```mermaid
 flowchart LR
     Browser[Vue 3 SPA] -->|HTTPS / Bearer JWT| Nginx[Nginx]
@@ -41,8 +45,11 @@ flowchart LR
     Worker --> Files
     Worker -->|内网 HTTP| Agent[acc-system-agent]
     Agent -->|只读挂载| Files
-    Agent -->|HTTPS| Model[远端已训练模型 API]
+    Agent -->|HTTPS| OCR[Novita DeepSeek-OCR-2]
+    OCR -->|识别文本| Agent
+    Agent -->|HTTPS| Flash[Novita DeepSeek-V4.1-Flash]
     Worker --> Outbox[(Notification Outbox)]
+    API --> Notification[(站内 Notifications)]
 ```
 
 核心原则：
@@ -53,6 +60,7 @@ flowchart LR
 - Worker 与 API 使用同一个后端镜像，仅启动命令不同；
 - 浏览器只能访问 Nginx，PostgreSQL、Redis、文件卷和内部 Worker 不暴露宿主机端口；
 - `acc-system-agent` 是独立镜像，不连接 PostgreSQL/Redis，不拥有业务状态机；
+- 当前模型链路先逐页/逐图 OCR，再对识别文本进行分类或审核；复用入口 `/v1/analyze-inline` 可接收独立调用方的 Base64 文件，但生产 Compose 不公开 Agent 端口；
 - Agent 或远端模型故障时只影响自动分析，上传、人工审核和批准仍可继续。
 
 ## 4. 仓库职责
@@ -80,7 +88,7 @@ acc-system-backend/
   .github/workflows/build-image.yml
 
 acc-system-agent/
-  本地 AI Harness；读取只读资料卷、调用远端模型并规范化输出
+  独立 AI Agent；读取只读资料卷、调用 Novita OCR/Flash、校验并规范化输出
   Dockerfile
   .github/workflows/build-image.yml
 
@@ -122,7 +130,6 @@ stateDiagram-v2
     CHANGES_REQUESTED --> IN_REVIEW: 客户再次提交
     IN_REVIEW --> READY_FOR_BOOKKEEPING: 全部必填项满足/豁免并批准
     READY_FOR_BOOKKEEPING --> IN_REVIEW: 管理员撤回批准并填写原因
-    READY_FOR_BOOKKEEPING --> CLOSED: 记账接收后关闭
     DRAFT --> CANCELLED
     OPEN --> CANCELLED
     IN_REVIEW --> CANCELLED
@@ -137,7 +144,7 @@ stateDiagram-v2
 4. 写入不可变的 `workflow_events`；
 5. 必要时写入 `notification_outbox`。
 
-`FIRM_ADMIN` 可在尚未关闭时把 `READY_FOR_BOOKKEEPING` 撤回到 `IN_REVIEW`，且必须填写原因；`CLOSED` 是终态，关闭后的更正通过新建收集请求处理。取消同样必须填写原因，避免审核中的请求无法终止或无从追溯。取消记录不会删除，但不再占用“客户 + 期间”的唯一名额，因此可以为相同期间重新创建请求；任意时刻仍只允许一个未取消请求。
+`FIRM_ADMIN` 可把 `READY_FOR_BOOKKEEPING` 撤回到 `IN_REVIEW`，且必须填写原因；当前不提供“关闭”操作，`READY_FOR_BOOKKEEPING` 对外显示“已确认”。取消同样必须填写原因。取消记录不会删除，但不再占用“客户 + 期间”的唯一名额，因此可以为相同期间重新创建请求；任意时刻仍只允许一个未取消请求。`IN_REVIEW` 下 AI 处理中、待人工审核、待人工确认等均为派生展示状态，不是新的数据库状态。
 
 ### 6.2 资料要求
 
@@ -171,7 +178,7 @@ AVAILABLE   -> EXCLUDED
 | `firms` | `id`, `name`, `timezone`, `status` |
 | `users` | `id`, `email`, `password_hash`, `name`, `status`, `last_login_at` |
 | `firm_members` | `firm_id`, `user_id`, `role` |
-| `clients` | `id`, `firm_id`, `code`, `legal_name`, `base_currency`, `features jsonb`, `status` |
+| `clients` | `id`, `firm_id`, `code`, `legal_name`, `industry`, `base_currency`, `features jsonb`, `status` |
 | `client_bank_accounts` | `id`, `firm_id`, `client_id`, `bank`, `account_last4`, `currency`, `status` |
 | `client_members` | `firm_id`, `client_id`, `user_id`, `role` |
 | `client_assignments` | `firm_id`, `client_id`, `user_id` |
@@ -185,7 +192,7 @@ AVAILABLE   -> EXCLUDED
 | --- | --- |
 | `collection_requests` | `id`, `firm_id`, `client_id`, `period`, `due_at`, `status`, `scope_note`, `ai_mode`, `review_preference`, legacy `ai_satisfy_threshold` / `ai_request_action_threshold`, `version`, `created_by`, `submitted_at`, `approved_by`, `approved_at` |
 | `requirements` | `id`, `firm_id`, `request_id`, `origin`, `type`, `analysis_type`, `title`, `required`, `criteria jsonb`, `status`, `issue_code`, `client_message`, `internal_note`, `version`, `reviewed_by`, `reviewed_at` |
-| `submissions` | `id`, `firm_id`, `request_id`, `round_no`, `status`, `note`, `submitted_by`, `submitted_at` |
+| `submissions` | `id`, `firm_id`, `request_id`, `round_no`, `status`, `note`, `manual_review_requested`, `submitted_by`, `submitted_at` |
 | `documents` | `id`, `firm_id`, `client_id`, `request_id`, `submission_id`, `storage_key`, `original_name`, `mime_type`, `size_bytes`, `sha256`, `document_type`, `entity_name`, `period`, `status`, `scan_error`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `extracted_data jsonb`, `uploaded_by`, `created_at` |
 | `requirement_documents` | `firm_id`, `requirement_id`, `document_id`, `relation` |
 | `review_decisions` | `id`, `firm_id`, `requirement_id`, `submission_id`, `decision`, `source`, `ai_run_id`, `issue_code`, `client_message`, `internal_note`, `created_by`, `created_at` |
@@ -209,6 +216,7 @@ AVAILABLE   -> EXCLUDED
 | --- | --- |
 | `ai_runs` | `id`, `firm_id`, `request_id`, `submission_id`, `purpose`, `status`, `model_version`, `input_snapshot jsonb`, `output jsonb`, `error`, `requested_by`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `created_at`, `finished_at` |
 | `notification_outbox` | `id`, `firm_id`, `request_id`, `channel`, `recipient`, `template`, `payload jsonb`, `dedupe_key`, `status`, `attempts`, `next_attempt_at`, `locked_by`, `locked_until`, `last_error`, `sent_at` |
+| `notifications` | `id`, `firm_id`, `user_id`, `event_id`, `read_at`, `created_at`；通过关联的工作流事件生成站内展示内容 |
 | `idempotency_records` | `id`, `firm_id`, `actor_id`, `key`, `method`, `path`, `request_hash`, `status`, `status_code`, `response_body jsonb`, `expires_at`, `created_at` |
 
 关键数据库约束：
@@ -240,21 +248,21 @@ app/
   auth.py
   models.py
   schemas.py
-  workflow.py
   storage.py
   worker.py
+  review_analysis.py
+  analysis_schemas.py
   api/
     auth.py
-    users.py
-    clients.py
-    collection_requests.py
-    documents.py
-    reviews.py
-  integrations/
-    agent.py
+    accounts.py
+    collections.py
+    portal.py
+    classification.py
+    review.py
+    notifications.py
 ```
 
-`workflow.py` 集中保存状态迁移和完成条件；路由只做输入校验、授权和调用。首版不增加 repository/interface/factory 层。
+状态迁移和完成条件由后端业务模块执行，`review_analysis.py` 负责 REVIEW 编排、搜索与自动决定；路由仍需校验输入与权限。当前不额外增加 repository/interface/factory 层。
 
 后续如出现频繁的内部数据运维需求，可接入 SQLAdmin；只开放受限的基础数据维护，不允许直接修改收集请求、资料要求、审核决定和审计记录，避免绕过业务状态机。
 
@@ -309,7 +317,7 @@ MVP 将文件保存到后端持久卷 `/data/documents`，`storage_key` 使用�
 
 ### 8.4 事务、并发与幂等
 
-- 发布、提交、退回、批准、撤回批准和关闭接口接收 `Idempotency-Key`；服务端先以唯一约束占用 key，再保存 actor、路径、请求哈希和小型响应。同 key 同请求重放原响应，同 key 不同请求返回 `409`；并发中的同 key 请求返回可重试冲突，记录按保留期清理；
+- 发布、提交、退回、批准和撤回批准接口接收 `Idempotency-Key`；服务端先以唯一约束占用 key，再保存 actor、路径、请求哈希和小型响应。同 key 同请求重放原响应，同 key 不同请求返回 `409`；并发中的同 key 请求返回可重试冲突，记录按保留期清理；
 - 修改请求或资料要求时提交当前 `version`。SQLAlchemy 版本不匹配时返回 `409` 和最新资源，要求用户刷新，不允许最后写入者静默覆盖前一人的审核；
 - 状态迁移仍使用 `SELECT ... FOR UPDATE` 锁定 `collection_requests`，并统一按“请求 → 要求 → 文档”的顺序加锁，防止批准与单项审核同时越过完成条件，也降低死锁风险；
 - `workflow_events`、当前状态和 outbox 必须在同一事务提交；审计事件没有更新/删除接口；
@@ -375,20 +383,20 @@ POST /collection-requests/{request_id}/copy?period=2026-09
 GET    /portal/collection-requests
 GET    /portal/collection-requests/{request_id}
 POST   /portal/collection-requests/{request_id}/classification-runs
-POST   /portal/collection-requests/{request_id}/documents
-DELETE /portal/documents/{document_id}             # 仅草稿且未提交；逻辑排除
-POST   /portal/ai-runs/{run_id}/start
-GET    /portal/ai-runs/{run_id}
-POST   /portal/ai-runs/{run_id}/confirm
-POST   /portal/ai-runs/{run_id}/cancel
+POST   /portal/collection-requests/{request_id}/documents # 表单可携带 classification_run_id
+GET    /portal/collection-requests/{request_id}/classification-runs/{run_id}
+POST   /portal/collection-requests/{request_id}/classification-runs/{run_id}/start
+POST   /portal/collection-requests/{request_id}/classification-runs/{run_id}/confirm
+POST   /portal/collection-requests/{request_id}/classification-runs/{run_id}/cancel
+POST   /portal/collection-requests/{request_id}/classification-runs/{run_id}/manual
+DELETE /portal/document-links/{link_id}             # 仅可编辑轮次；逻辑排除
 POST   /portal/collection-requests/{request_id}/submit
 
-GET    /documents/{document_id}
 GET    /documents/{document_id}/download
-GET    /documents/{document_id}/preview
+GET    /portal/document-links/{link_id}/download
 ```
 
-文件上传使用标准 `multipart/form-data`，受理后返回 `202 Accepted`；前端轮询文档详情直到 `AVAILABLE` 或 `FAILED`。批量分类的文件在确认前不进入正式清单；`OTHER` 进入其他资料，`INVALID` 和取消的文件逻辑排除。全部 HTTP 请求统一经过 Axios 实例，上传进度使用 `onUploadProgress`。
+文件上传使用标准 `multipart/form-data`，前端轮询文档或分类 run 直到 `AVAILABLE`、`FAILED` 或分析结束。批量分类的文件在确认前不进入正式清单；`OTHER` 进入其他资料，`INVALID` 和取消的文件逻辑排除。全部 HTTP 请求统一经过 Axios 实例，上传进度使用 `onUploadProgress`。`submit` 可选 `manual_review_requested=true`，但仅 AI 自动退回后的有效场景允许跳过下一轮 REVIEW。
 
 ### 9.4 审核
 
@@ -397,13 +405,13 @@ POST /requirements/{requirement_id}/review
 POST /collection-requests/{request_id}/request-changes
 POST /collection-requests/{request_id}/approve
 POST /collection-requests/{request_id}/reopen
-POST /collection-requests/{request_id}/close
-POST /collection-requests/{request_id}/ai-runs
-GET  /ai-runs/{run_id}
-POST /ai-runs/{run_id}/retry
+GET  /collection-requests/{request_id}/review-runs
+POST /collection-requests/{request_id}/review-runs/{run_id}/retry
 ```
 
-单项审核 `decision` 为 `SATISFY`、`REQUEST_ACTION` 或 `WAIVE`，并显式提交 evidence 及其关系。`REQUEST_ACTION` 必须有 `issue_code` 和面向客户的明确说明；`WAIVE` 必须有原因且永远不由 AI 自动执行。整单批准接口再次检查所有必填项，AI 不得自动进入 `READY_FOR_BOOKKEEPING`。所有修改状态的请求携带当前 `version`；发布、提交、退回、批准、撤回批准和关闭同时携带 `Idempotency-Key`。
+单项审核 `decision` 为 `SATISFY`、`REQUEST_ACTION` 或 `WAIVE`，并显式提交 evidence 及其关系。`REQUEST_ACTION` 必须有 `issue_code` 和面向客户的明确说明；`WAIVE` 必须有原因且永远不由 AI 自动执行。整单批准接口再次检查所有必填项，AI 不得自动进入 `READY_FOR_BOOKKEEPING`。修改状态的请求执行版本与幂等保护；不再提供关闭动作。
+
+站内通知使用 `GET /notifications`、`POST /notifications/{notification_id}/read` 和 `POST /notifications/read-all`；客户端公开时间线由后端过滤 `workflow_events`，不暴露内部备注、模型原始输出或搜索轨迹。
 
 ## 10. AI 接口边界
 
@@ -417,13 +425,15 @@ POST /ai-runs/{run_id}/retry
 
 `CLASSIFY` 只能返回 `REQUIREMENT | OTHER | INVALID`、`document_type`、`requirement_id` 和 `confidence`。此阶段不检查主体、期间和金额，不持久化完整提取字段，不搜索历史资料，不产生审核决定，也不修改 requirement/collection 状态。只有客户显式确认合入后，Backend 才按普通人工上传的规则关联文件并将待收集项标为 `RECEIVED`；这不是 AI 审核决定。
 
-首批本地功能（B6.2/A2/F7.1/F7.2）用 `AGENT_CLASSIFICATION_PROVIDER=MOCK` 验证交互，页面必须显示模拟标识，生产禁用 MOCK。分类 run 的成功/失败与用户确认分开：`confirmed_at` 和 `confirmation` 保存幂等合入结果。取消不会关联暂存文件；扫描后可改为手动分类。远端模型未提供协议及凭据前，不宣称分类准确率或真实模型联调完成。
+早期阶段使用 MOCK 验证了交互；当前生产分类与审核 Provider 均为 `DEEPSEEK`，调用 Novita。分类 run 的成功/失败与用户确认分开：`confirmed_at` 和 `confirmation` 保存幂等合入结果。取消不会关联暂存文件；扫描后可改为手动分类。真实调用已接通，但分类准确率仍需独立评估。
 
 客户正式提交后再执行完整审核：
 
 ```text
 提交 → IN_REVIEW → REVIEW run → 字段提取 → 当前/历史资料搜索 → 证据与金额核对 → 任一项未通过则自动退回客户 → 全部通过后等待会计确认整单
 ```
+
+AI 自动退回后，客户可以保留当前有效文件原样再提交并明确请求人工复审。新 submission 标记 `manual_review_requested`，后端跳过本轮 REVIEW run，直接交给会计；普通补交不受影响。
 
 ### 10.2 Backend-Agent 协议
 
@@ -446,7 +456,11 @@ Idempotency-Key: <ai_run_id>:<turn>
   "context": {
     "entity_name": "Alpha Consulting Pte. Ltd.",
     "period": "2026-08-01",
-    "submission_id": "uuid"
+    "submission_id": "uuid",
+    "industry": "Professional Services",
+    "base_currency": "SGD",
+    "features": {},
+    "bank_accounts": []
   },
   "requirements": [
     {
@@ -503,9 +517,9 @@ Idempotency-Key: <ai_run_id>:<turn>
 
 搜索轮响应的 `findings` 必须为空，`search` 包含 `action`、`requirement_id` 以及可选 `document_type/period/query/amount/currency`；Backend 执行租户/客户限定搜索并增加下一轮输入。最终结果必须覆盖每个输入文件和资料项。金额关系使用 `SUM/SUBTRACT/MULTIPLY`，每个 operand 为 `{document_id, amount, label}`，强制关联证据。实际严格定义见 Backend/Agent 同步的 `app/analysis_schemas.py`。
 
-**当前实现边界（B6.4/F7.3，2026-09-24，用户验收通过）**：已接通提交后分析、最多三轮搜索、证据验证、Decimal 重算、高置信度问题自动退回、通过项自动满足和整轮人工确认、人工显式 evidence 与 `SUPPRESSED` Outbox。`SUGGEST` 只保存建议，`OFF` 不创建 REVIEW；豁免和整单批准保持人工。开发环境使用 `AGENT_REVIEW_PROVIDER=MOCK` 固定案例，生产禁止模拟；真实模型协议尚待提供，不能把模拟结果当作文件真实提取或模型准确率验证。
+**当前实现边界（2026-09-26）**：已接通提交后真实 OCR/Flash 分析、最多三轮搜索、证据验证、Decimal 重算、明确问题自动退回、通过项自动满足和整轮人工确认。`SUGGEST` 只保存建议，`OFF` 不创建 REVIEW；豁免和整单批准保持人工。REVIEW 不使用模型自报 `confidence`，旧阈值字段仅作兼容；是否 `ASK_CLIENT` 或 `ESCALATE` 受请求级 `review_preference` 指引，但 Backend 仍独立验证。已做部分案例联调，尚未证明全量数据集表现或误退回率。
 
-**后续策略调整（待用户验收）**：保留上述历史验收记录，但当前代码已改为传递 `review_preference` 并由 Agent 在退回与转人工间选择；REVIEW 协议不再接受或返回 `confidence`。旧阈值字段只作 API/数据库兼容；历史审核记录对外读取时过滤旧分数，不改写原始数据。此调整尚未部署或经真实业务样本完成误退回率评估。
+**Agent 内部链路**：`DEEPSEEK` Provider 对 PDF 每页及图片调用 Novita `deepseek/deepseek-ocr-2`，再把识别文本及受控上下文交给 `deepseek/deepseek-v4.1-flash`；REVIEW 启用低强度 reasoning，CLASSIFY 不启用。Agent 以配置记录模型版本而非采信模型自报值。逐阶段结构化日志只记录状态、耗时与安全摘要，不输出文件正文和密钥。`POST /v1/analyze-inline` 是携带 Base64 文件、以 `AGENT_API_KEY` 鉴权的复用接口；当前未通过公网公开。未来自训练模型可由 `REMOTE` Provider 对接，不改变 Backend-Agent 业务协议。
 
 ## 11. 前端设计
 
@@ -530,26 +544,28 @@ Idempotency-Key: <ai_run_id>:<turn>
 
 ```text
 /login
-/app/dashboard
-/app/clients
-/app/clients/:id
-/app/collections
-/app/collections/new
-/app/collections/:id
-/app/collections/:id/review
-/app/admin/users
+/staff
+/staff/clients
+/staff/clients/:id
+/staff/collections
+/staff/collections/new
+/staff/collections/:id
+/staff/collections/:id/review
+/staff/notifications
+/staff/admin/users
 
-/portal/collections
-/portal/collections/:id
+/client/collections
+/client/collections/:id
+/client/notifications
 ```
 
 会计端：
 
-- `/app/dashboard` 默认显示 `待我审核`、`等待客户`、`即将到期`、`已逾期` 四个队列和数量；
-- `/app/collections` 使用服务端分页表格，固定筛选项为客户、期间、状态、负责人、截止日期；筛选条件写入 URL query，返回列表时不丢失；
+- `/staff` 提供会计工作台；
+- `/staff/collections` 使用服务端分页表格，支持客户、期间、状态等筛选和更新时间排序；
 - 桌面端点击表格行先打开右侧详情面板，支持继续打开完整页面；窄屏直接进入完整页面；
-- `/app/collections/:id/review` 使用三块区域：左侧资料要求列表，中间文件预览/提取字段，右侧审核动作与 AI 结果；活动时间线统一位于请求详情页；
-- 只展示当前状态和权限允许的业务动作，例如“发布”“要求补交”“批准进入记账”“关闭”，不提供任意状态下拉框；
+- `/staff/collections/:id/review` 使用资料要求、文件预览/提取字段、审核动作与 AI 结果区域；活动时间线统一位于请求详情页；
+- 只展示当前状态和权限允许的业务动作，例如“发布”“要求补交”“确认整单”，不提供任意状态下拉框或“关闭”动作；
 - 创建请求时配置 AI 模式与文字审核偏好；上传阶段只显示类别、目标资料项和分类置信度，不提前显示审核结论；
 - 提交后的 AI 自动决定使用独立视觉标识，展示模型版本、证据、提取字段、金额关系和转人工原因；会计可追加人工决定覆盖 AI 结果。
 
@@ -558,7 +574,8 @@ Idempotency-Key: <ai_run_id>:<turn>
 - 请求详情顶部显示期间、截止日、负责人和整体进度；
 - 每个 requirement 是一个可展开条目，明确展示需要的资料、已上传文件、审核结果和补交原因；
 - 上传区绑定具体 requirement，并同时提供“其他支持文件”；
-- 页面底部固定主动作“提交审核/再次提交”，提交前列出仍未上传或仍需处理的必填项；
+- 页面底部悬浮且不透明的主动作栏提供“提交审核/再次提交”，正文保留底部滚动空间；
+- AI 自动退回时允许原样提交并申请人工复审；客户右侧进度时间线只显示公开节点，并区分 AI 审核与人工处理；
 - 客户只能看到对客户公开的审核意见，事务所内部备注与 AI 原始输出不返回到 portal API。
 
 状态既显示文字和图标，也可显示颜色，但不能只靠颜色表达。破坏性动作、豁免和最终批准需要确认弹窗；普通单项审核不重复弹窗。
@@ -640,7 +657,7 @@ src/
 
 ## 12. 通知接口
 
-通知不是审批状态的驱动者，只消费领域事件。以下事件写入 outbox：
+通知不是审批状态的驱动者，只消费领域事件。站内 `notifications` 与外部渠道 `notification_outbox` 是两条不同的交付路径：站内通知已上线，用户可在独立页面和入口查看未读数并标记已读；外部 Email/飞书仍未发送。以下事件属于外部 Outbox 设计范围：
 
 - `REQUEST_PUBLISHED`
 - `DUE_SOON`
@@ -648,7 +665,7 @@ src/
 - `CHANGES_REQUESTED`
 - `READY_FOR_BOOKKEEPING`
 
-Worker 按第 8.4 节的租约规则领取任务，失败后指数退避。`dedupe_key` 建唯一索引，防止定时任务或重试重复催办；发送前再次检查请求状态，请求进入 `IN_REVIEW`、`READY_FOR_BOOKKEEPING`、`CLOSED` 或 `CANCELLED` 后不再发送客户催办。
+未来启用外部渠道后，Worker 按第 8.4 节的租约规则领取任务，失败后指数退避。`dedupe_key` 建唯一索引，防止定时任务或重试重复催办；发送前再次检查请求状态，请求进入 `IN_REVIEW`、`READY_FOR_BOOKKEEPING` 或 `CANCELLED` 后不再发送客户催办。
 
 Outbox 提供的是“至少一次”投递：如果外部渠道发送成功后 Worker 在回写前崩溃，邮件仍可能重复。`dedupe_key` 负责防止重复创建任务；渠道支持幂等键时继续透传。首版不为追求不可能的跨系统原子提交引入消息中间件，页面中的请求状态始终是最终依据。
 
@@ -671,14 +688,14 @@ send(recipient: str, template: str, payload: dict) -> None
 | `backend` | ECR `acc-system-backend` | FastAPI API |
 | `worker` | 同一个 backend 镜像 | 仅覆盖启动命令，不重复构建镜像 |
 | `migrate` | 同一个 backend 镜像 | 一次性执行 `uv run alembic upgrade head` |
-| `agent` | ECR `acc-system-agent` | 本地 AI Harness，读取只读资料卷并调用远端模型 |
+| `agent` | ECR `acc-system-agent` | 独立 Agent，读取只读资料卷，串联 Novita OCR-2 与 V4.1 Flash |
 | `postgres` | 官方 PostgreSQL 固定版本/摘要 | 使用独立持久卷，不重打无变化的自定义镜像 |
 | `redis` | 官方 Redis 固定版本/摘要 | JWT refresh session、撤销和限流；仅内网访问 |
 | `clamav` | 官方镜像，可按环境启用 | 上传文件恶意内容扫描 |
 
 数据库和 Redis 已经分别是独立 Docker image。除非确实需要扩展或初始化脚本，不复制官方 Dockerfile，也不推送同内容镜像到 ECR。
 
-Compose 通过 `AGENT_IMAGE` 固定 Agent 镜像 SHA；Backend/Worker 使用 `AGENT_URL=http://agent:8000`，Agent 使用 `MODEL_API_URL`、`MODEL_HEALTH_URL`、`MODEL_API_KEY`、`MODEL_CONNECT_TIMEOUT_SECONDS`、`MODEL_REQUEST_TIMEOUT_SECONDS` 和 `DOCUMENT_PATH=/data/documents`。`MODEL_HEALTH_URL` 显式指定只读健康探针地址，不用推理请求做健康检查；真实模型协议未提供前，健康响应约定仅用于基线测试。Agent live 与 ready 分离，模型未配置不会阻止人工业务服务启动。
+Compose 通过 `AGENT_IMAGE` 固定 Agent 镜像 SHA；Backend/Worker 使用 `AGENT_URL=http://agent:8000`。生产 Agent 将 `AGENT_CLASSIFICATION_PROVIDER` 和 `AGENT_REVIEW_PROVIDER` 设为 `DEEPSEEK`，以服务器环境文件中的 `NOVITA_API_KEY` 调用 OCR 与 Flash；`OCR_MODEL`、`MODEL_NAME`、各自 URL/key 和超时可分别覆盖。当前 `MODEL_REQUEST_TIMEOUT_SECONDS=300`。Agent live 与 ready 分离，即使模型不可用也不阻止 Backend 的人工业务服务启动。独立复用接口需要额外配置 `AGENT_API_KEY`，并应置于受保护的 HTTPS 网关之后；Folio Compose 不映射 Agent 宿主机端口。
 
 ### 13.2 Compose 约束
 
@@ -691,7 +708,8 @@ Compose 通过 `AGENT_IMAGE` 固定 Agent 镜像 SHA；Backend/Worker 使用 `AG
 - Nginx 将 `/api/` 转发到 backend，将其他路径转发到 frontend；
 - Nginx 和 FastAPI 都配置上传大小与超时，二者限制保持一致；
 - `/api/v1/health/live` 只检查进程，`/api/v1/health/ready` 检查 PostgreSQL 和 Redis；
-- 生产 `.env` 只保存在服务器，数据库密码、JWT 签名密钥、AWS、`MODEL_API_KEY` 不进入镜像或 Git。
+- 生产 `.env.prod` 只保存在服务器，数据库密码、JWT 签名密钥、AWS、`NOVITA_API_KEY`、`AGENT_API_KEY` 不进入镜像或 Git。
+- 生产额外叠加 `compose.tls.yml`，域名 `folio.sarl` 经 Cloudflare 到源站 TLS，Cookie 使用 `Secure`。
 
 ### 13.3 GitHub Actions 与 ECR
 
@@ -706,9 +724,9 @@ Compose 通过 `AGENT_IMAGE` 固定 Agent 镜像 SHA；Backend/Worker 使用 `AG
 服务器发布命令保持简单：
 
 ```bash
-docker compose --env-file .env.prod pull
-docker compose --env-file .env.prod run --rm migrate
-docker compose --env-file .env.prod up -d --remove-orphans
+docker compose --env-file .env.prod -f compose.yml -f compose.tls.yml pull
+docker compose --env-file .env.prod -f compose.yml -f compose.tls.yml run --rm migrate
+docker compose --env-file .env.prod -f compose.yml -f compose.tls.yml up -d
 ```
 
 CI 只构建和推送，不直接 SSH 生产服务器。需要自动部署时，再增加受保护环境审批后的部署 job。
@@ -741,6 +759,8 @@ CI 只构建和推送，不直接 SSH 生产服务器。需要自动部署时，
 13. 文件在扫描完成前不可下载；扫描成功后只能通过已授权的下载接口访问，直接请求 Nginx 内部路径返回拒绝。
 14. portal 响应不包含内部备注和 AI 原始输出；猜测其他事务所的资源 id 无法读取或关联。
 15. 相同 `Idempotency-Key` 和相同请求返回原结果；同 key 不同请求返回 `409`。
+16. AI 自动退回后客户可不修改文件直接申请人工复审；下一轮不触发 REVIEW run，会计可人工作出结论。
+17. 用户在独立通知页看到状态更新；客户端时间线只公开适当节点，不能泄漏内部备注和模型轨迹。
 
 ## 16. 实施顺序
 
@@ -756,6 +776,8 @@ CI 只构建和推送，不直接 SSH 生产服务器。需要自动部署时，
 10. B6.4 + F7.3：问题自动退回、通过项自动满足、整轮人工确认、Outbox 和综合验收。
 
 第 6 步完成后，即使关闭 AI 和消息渠道，系统也已经具备账户、收集、提交、退回、补交和批准的完整人工业务闭环。
+
+后续已完成真实 Novita OCR→Flash 链路、站内通知、客户公开时间线、AI 自动退回后的原样提交与人工复审，以及 `folio.sarl` HTTPS 部署。尚待完成的是全量 case 质量评估、外部通知渠道、备份恢复演练和集中告警，不能把链路联通等同于 AI 质量验收。
 
 ## 17. 开发执行文档
 

@@ -1,11 +1,11 @@
-# 会计事务所资料收集系统——系统设计说明书
+# Folio——系统设计说明书
 
 | 文档属性 | 内容 |
 | --- | --- |
-| 系统名称 | Client Records / 会计事务所资料收集系统 |
-| 文档版本 | 1.0 |
-| 文档状态 | 最终交付版 |
-| 基线日期 | 2026-09-25 |
+| 系统名称 | Folio |
+| 文档版本 | 1.1 |
+| 文档状态 | 当前交付基线（随实现更新） |
+| 基线日期 | 2026-09-26 |
 | 适用对象 | 项目负责人、会计业务人员、研发、测试、运维及 AI 团队 |
 | 设计范围 | Web 前端、业务后端、异步 Worker、AI Agent、数据存储、容器部署和运维边界 |
 
@@ -21,6 +21,13 @@
 6. 哪些能力已经实现，哪些仍属于正式生产前待办。
 
 本文描述当前交付基线，不用未来规划冒充已实现功能。阶段开发过程和详细 Agent 协议分别参见文末交付物索引。
+
+汇报用架构图（独立 HTML，内嵌矢量图与技术标识，可离线查看）：
+
+- [系统架构与技术栈](./Folio_系统架构与技术栈.html)
+- [前端架构](./Folio_前端架构.html)：浏览器 SPA、会计与客户工作区、共享状态、API 调用及静态部署。
+- [后端架构](./Folio_后端架构.html)：API、权限与事务、Worker、证据搜索、基础设施及结果回写。
+- [AI Agent 架构](./Folio_AI_Agent架构.html)：独立接口、文件校验、OCR、两阶段分析、结果校验及 Backend 边界。
 
 ## 2. 项目背景与目标
 
@@ -63,9 +70,10 @@
 | 收集请求 | 创建、编辑草稿、复制历史请求、发布、取消、筛选、排序和分页 |
 | 客户门户 | 查看请求、拖动上传、批量上传、文件预览、备注、移除草稿文件、提交、补交和公开流程时间线 |
 | 文件处理 | PDF/PNG/JPEG 校验、大小限制、SHA-256 去重、隔离区、ClamAV 扫描、受控下载 |
-| 审核闭环 | 单项通过、退回、豁免，多轮补交，整单批准、撤回批准和关闭 |
+| 审核闭环 | 单项通过、退回、豁免，多轮补交，整单人工确认与撤回确认；AI 自动退回后客户可原样提交并请求人工复审 |
 | 证据与审计 | 显式 evidence 关系、不可变审核决定、活动记录、SYSTEM/USER actor 区分 |
-| AI 基线 | 上传快速分类、提交后完整审核、搜索动作、金额关系、自动退回和自动满足单项 |
+| AI 基线 | Novita DeepSeek-OCR-2 逐页识别 PDF/图片，再由 DeepSeek-V4.1-Flash 快速分类或提交后完整审核；支持搜索、金额关系、自动退回和自动满足单项 |
+| 站内通知 | 通知列表、未读数、已读操作；按公开工作流事件向相关用户生成通知 |
 | 前端体验 | 响应式布局、英文默认、简体中文、浅色/深色主题、统一筛选和状态展示 |
 | 工程交付 | 前后端与 Agent 独立仓库和镜像、GitHub Actions、ECR、Docker Compose 部署 |
 
@@ -73,9 +81,9 @@
 
 | 能力 | 当前状态 |
 | --- | --- |
-| 真实 AI 模型 | Agent 和协议已部署；尚无正式模型 URL、健康地址和密钥，生产 Provider 为 `DISABLED` |
-| Email/飞书通知 | Outbox 和去重已实现；记录固定为 `SUPPRESSED/PROVIDER_DISABLED`，不实际发送 |
-| HTTPS 与正式域名 | 当前演示环境仅开放 HTTP 80；正式使用前必须配置域名、证书和安全 Cookie |
+| AI 质量验证 | 真实 OCR 和 Flash 已联调并上线；部分 v5 case 已抽样验证，但未完成全量数据集、误退回率及财务专业评估。自训练模型的 `REMOTE` 适配接口仍待模型团队交付 |
+| Email/飞书通知 | 站内通知已实现；外部渠道 Outbox 和去重已实现，但记录为 `SUPPRESSED/PROVIDER_DISABLED`，不实际发送 |
+| HTTPS 与正式域名 | `https://folio.sarl` 已接入 Cloudflare 和源站 TLS，生产启用安全 Cookie；仍需持续监测证书续期和安全配置 |
 | 自动备份与恢复演练 | 已定义要求，尚未交付定时备份、异地副本和可验证恢复报告 |
 | 监控告警 | 有健康检查和结构化日志基线；尚未接入集中日志、指标平台和告警渠道 |
 
@@ -94,7 +102,7 @@
 | --- | --- | --- |
 | 客户不知道缺什么 | 收集请求包含结构化 requirements | 客户门户逐项显示必交材料和当前状态 |
 | 文件经常不完整或错误 | 安全扫描、快速分类、提交后主体/期间/金额审核 | 问题项显示明确原因并可退回补交 |
-| 反复提醒耗时 | Dashboard、截止日期、状态筛选、通知 Outbox | 会计可快速定位等待客户、逾期和待审核请求 |
+| 反复提醒耗时 | Dashboard、截止日期、状态筛选、站内通知与外部渠道 Outbox | 会计可快速定位等待客户、逾期和待审核请求 |
 | 补交后历史混乱 | 每次提交生成独立 submission round | 会计统一切换轮次，旧文件和决定仍可追溯 |
 | 多文件关系复杂 | requirement 与 document 多对多，保存 evidence relation | 支持多发票对一笔付款、历史发票和当前付款等场景 |
 | AI 结论不可控 | Backend 校验 Agent 输出，整单批准始终人工 | 非法 evidence、证据不足或错误金额关系转人工 |
@@ -108,7 +116,7 @@
 | 角色 | 主要职责 |
 | --- | --- |
 | `FIRM_ADMIN` | 管理事务所员工、客户、分配关系和全部请求；可撤回整单批准 |
-| `ACCOUNTANT` | 管理被分配客户的收集请求、审核、退回、豁免、批准和关闭 |
+| `ACCOUNTANT` | 管理被分配客户的收集请求、审核、退回、豁免和整单确认 |
 | `CLIENT_ADMIN` | 查看所属客户请求、上传和提交资料，并管理本客户联系人 |
 | `CLIENT_SUBMITTER` | 查看所属客户请求、上传、移除草稿资料和提交 |
 
@@ -126,7 +134,6 @@
 | 单项审核和豁免 | ✓ | 已分配客户 | — | — |
 | 整单批准 | ✓ | 已分配客户 | — | — |
 | 撤回整单批准 | ✓ | — | — | — |
-| 关闭已确认请求 | ✓ | 已分配客户 | — | — |
 
 前端路由守卫仅用于改善体验。后端每次请求都根据 JWT 中的用户、事务所成员关系、客户成员关系或会计分配关系重新授权。
 
@@ -141,7 +148,7 @@
 | 工作流 | 固定状态机和业务动作 API | 流程明确，不为暂不存在的自定义流程需求引入引擎 |
 | 文件存储 | Docker 持久卷 | 满足当前单机演示；容量和容灾成为瓶颈后再迁移 S3 |
 | AI 接入 | 独立只读 Agent + 远端模型 API | 模型无权访问业务数据库，Backend 保持最终裁决权 |
-| 通知 | Transactional Outbox | 状态和待发送记录原子提交，渠道失败不回滚业务 |
+| 通知 | 站内 `notifications` + 外部渠道 Transactional Outbox | 站内通知供用户立即查看；Email/飞书未启用时不阻塞业务 |
 | 前后端命名 | API `snake_case`，前端 `camelCase` | 后端符合 Python 习惯，转换集中在 Axios 边界 |
 | 前端状态 | Pinia 仅保存认证和 UI 偏好 | 页面数据以服务端为准，避免第二套业务状态 |
 
@@ -152,13 +159,19 @@ flowchart LR
     Staff[事务所管理员 / 会计]
     Client[客户管理员 / 提交人]
     System[资料收集系统]
-    Model[远端已训练模型]
+    Agent[独立 acc-system-agent]
+    OCR[Novita DeepSeek-OCR-2]
+    Flash[Novita DeepSeek-V4.1-Flash]
     Notify[Email / 飞书渠道\n后续接入]
 
     Staff -->|创建请求、审核、批准| System
     Client -->|上传、提交、补交| System
-    System -->|完整文件与审核上下文| Model
-    Model -->|分类、提取、finding、搜索动作| System
+    System -->|文件引用与审核上下文| Agent
+    Agent -->|PDF 页面/图片| OCR
+    OCR -->|OCR 文本| Agent
+    Agent -->|OCR 文本与业务上下文| Flash
+    Flash -->|分类或结构化审核结果| Agent
+    Agent -->|严格校验后的结果| System
     System -.->|Outbox 消息| Notify
 ```
 
@@ -183,9 +196,10 @@ flowchart TB
         ClamAV[ClamAV]
     end
 
-    Model[Remote Model API]
+    OCR[Novita DeepSeek-OCR-2]
+    Flash[Novita DeepSeek-V4.1-Flash]
 
-    Browser -->|HTTP/HTTPS| Nginx
+    Browser -->|HTTPS| Nginx
     Nginx -->|/| Frontend
     Nginx -->|/api| API
     API --> PG
@@ -197,7 +211,9 @@ flowchart TB
     Worker --> Docs
     Worker -->|内网 HTTP| Agent
     Agent -->|只读| Docs
-    Agent -->|HTTPS + Bearer| Model
+    Agent -->|HTTPS + API Key| OCR
+    OCR -->|识别文本| Agent
+    Agent -->|HTTPS + API Key| Flash
     Nginx -->|授权后的 X-Accel-Redirect| Docs
 ```
 
@@ -208,6 +224,7 @@ flowchart TB
 - Worker 与 API 使用同一个后端镜像，但启动命令不同；
 - Agent 没有 PostgreSQL、Redis、JWT 密钥和业务写权限；
 - Nginx 只读挂载最终资料卷，不挂载隔离区；
+- Agent 的内网 `/v1/analyze` 使用只读 documents 卷；可复用的 `/v1/analyze-inline` 接受 Base64 文件，但只有配置独立 Agent API Key 后才启用，当前 Compose 不把 Agent 端口暴露到宿主机；
 - 模型故障不影响人工上传、审核和批准。
 
 ## 9. 组件设计
@@ -243,7 +260,7 @@ flowchart TB
 - 业务状态机、幂等、并发控制和审计；
 - 文件元数据、受控下载和 Portal 数据隔离；
 - AI run 编排、输出校验、自动单项决定和人工覆盖；
-- Outbox 生成。
+- 站内通知及外部渠道 Outbox 生成。
 
 ### 9.4 Backend Worker
 
@@ -263,15 +280,17 @@ flowchart TB
 
 - 校验 `storage_key`、普通文件、MIME 文件头、大小和 SHA-256；
 - 从只读卷读取完整 PDF/图片；
-- 把文件转换为 Base64 后调用远端模型；
+- PDF 逐页渲染、图片预处理后调用 Novita DeepSeek-OCR-2，再把 OCR 文本及允许的上下文送入 DeepSeek-V4.1-Flash；
+- 使用配置值记录实际模型版本，不信任模型自行生成的版本字符串；
 - 校验 CLASSIFY/REVIEW 的严格 schema；
+- 提供可独立复用的鉴权 `/v1/analyze-inline`，与内网卷协议共享分析逻辑；
 - 返回稳定错误，不泄漏模型响应、文件内容或密钥。
 
-Agent 不能搜索业务数据、修改状态、发送通知或批准整单。
+Agent 可以提出 `SEARCH_CURRENT/SEARCH_HISTORY` 请求，但搜索由 Backend 在租户与客户范围内执行；Agent 不能直接搜索数据库、修改状态、发送通知或批准整单。
 
 ### 9.6 PostgreSQL
 
-保存账户、客户、收集请求、提交轮次、文件元数据、审核决定、事件、AI run、幂等记录和 Outbox。它是业务事实的唯一权威来源。
+保存账户、客户、收集请求、提交轮次、文件元数据、审核决定、事件、AI run、站内通知、幂等记录和 Outbox。它是业务事实的唯一权威来源。
 
 ### 9.7 Redis
 
@@ -343,15 +362,18 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant Worker as Worker
     participant Agent as Agent
-    participant Model as Remote Model
+    participant OCR as Novita OCR-2
+    participant Flash as Novita V4.1 Flash
 
     Client->>API: 提交本轮资料 + 可选备注
     API->>DB: submission=SUBMITTED, request=IN_REVIEW
     API->>DB: 创建 REVIEW run（OFF 除外）
     Worker->>DB: 领取 run 租约
     Worker->>Agent: purpose=REVIEW, review_preference, turn=0
-    Agent->>Model: 文件先 OCR，再送 OCR 文本与上下文
-    Model-->>Agent: finding 或 SEARCH action
+    Agent->>OCR: 完整文件逐页/逐图识别
+    OCR-->>Agent: OCR 文本
+    Agent->>Flash: OCR 文本、资料要求和可见证据
+    Flash-->>Agent: finding 或 SEARCH action
     alt 需要搜索
         Worker->>DB: 按事务所/客户范围搜索
         Worker->>Agent: 下一 turn + 搜索结果
@@ -370,6 +392,8 @@ sequenceDiagram
 报销单的合计只是待验证主张。对于含报销单的审核，自动满足前还须证明每笔报销行都有不同的原始收据，收据金额、币种和报销合计一致，并在审核证据及结构化金额关系中引用这些收据。Agent 与 Backend 双重校验；缺失收据经当前资料搜索仍未找到时可明确退回补交，校验失败或无法定位缺口时留给会计复核。
 
 补交动作按“客户需要上传什么”归属，而不是按“哪个分析发现问题”归属。银行对账发现支持发票不足时，银行资料项保持待审核，发票资料项进入 `NEEDS_ACTION`。`MISSING/INCOMPLETE` finding 通过 `requested_document_type` 声明补交类型；Agent 和 Backend 会拒绝错误归属，目标类型不在清单中时也不自动退回，而是交由会计处理。
+
+若客户认为 AI 自动退回有误，可在下一轮选择“请求人工复审”，保留原有有效文件并原样提交；该轮不创建 REVIEW run，直接进入会计待办。普通补交仍按请求的 AI 模式执行。
 
 ### 10.5 会计审核与整单确认
 
@@ -395,7 +419,6 @@ stateDiagram-v2
     CHANGES_REQUESTED --> IN_REVIEW: 客户再次提交
     IN_REVIEW --> READY_FOR_BOOKKEEPING: 会计人工确认
     READY_FOR_BOOKKEEPING --> IN_REVIEW: 管理员撤回批准
-    READY_FOR_BOOKKEEPING --> CLOSED: 记账接收后关闭
     DRAFT --> CANCELLED: 取消
     OPEN --> CANCELLED: 取消
     IN_REVIEW --> CANCELLED: 取消
@@ -412,8 +435,9 @@ stateDiagram-v2
 | `IN_REVIEW` 且本轮 AI 全部通过 | 待人工确认 |
 | `CHANGES_REQUESTED` | 待客户补交 |
 | `READY_FOR_BOOKKEEPING` | 已确认 |
-| `CLOSED` | 已关闭 |
 | `CANCELLED` | 已取消 |
+
+`READY_FOR_BOOKKEEPING` 是当前流程的“已确认”终点；数据库旧约束中的 `CLOSED` 仅为历史兼容，不提供关闭操作或用户筛选项。`IN_REVIEW` 的“待人工确认／待人工审核”是基于 AI run 和单项结果推导的展示状态，不新增持久状态；客户端筛选只保留统一的“审核中”。
 
 ### 11.2 资料项状态
 
@@ -472,6 +496,7 @@ erDiagram
     COLLECTION_REQUEST ||--o{ WORKFLOW_EVENT : audits
     COLLECTION_REQUEST ||--o{ AI_RUN : analyzes
     COLLECTION_REQUEST ||--o{ NOTIFICATION_OUTBOX : emits
+    USER ||--o{ NOTIFICATION : receives
 ```
 
 ### 12.2 表分组
@@ -480,10 +505,11 @@ erDiagram
 | --- | --- |
 | 身份与权限 | `firms`, `users`, `firm_members`, `client_members`, `client_assignments` |
 | 客户基础资料 | `clients`, `client_bank_accounts`, `user_invites`, `password_reset_tokens` |
-| 收集流程 | `collection_requests`, `requirements`, `submissions` |
+| 收集流程 | `collection_requests`, `requirements`, `submissions`（含 `manual_review_requested`） |
 | 文件与证据 | `documents`, `requirement_documents`, `review_decision_documents` |
 | 审核与审计 | `review_decisions`, `workflow_events`, `audit_events` |
 | 异步与可靠性 | `ai_runs`, `notification_outbox`, `idempotency_records` |
+| 站内通知 | `notifications`，按接收人记录标题、内容、已读时间及目标请求 |
 
 ### 12.3 关键约束
 
@@ -528,8 +554,9 @@ erDiagram
 | 收集请求 | `/collection-requests`, `/{id}/publish`, `/{id}/copy`, `/{id}/cancel`, `/{id}/events` |
 | 客户门户 | `/portal/collection-requests`, `/documents`, `/document-links`, `/{id}/submit` |
 | 上传分类 | `/portal/collection-requests/{id}/classification-runs/*` |
-| 审核 | `/requirements/{id}/review`, `/{id}/request-changes`, `/{id}/approve`, `/{id}/reopen`, `/{id}/close` |
+| 审核 | `/requirements/{id}/review`, `/{id}/request-changes`, `/{id}/approve`, `/{id}/reopen` |
 | AI 审核查询 | `/collection-requests/{id}/review-runs`, `/{run_id}/retry` |
+| 站内通知 | `GET /notifications`, `POST /notifications/{id}/read`, `POST /notifications/read-all` |
 | 文件下载 | 员工 `/documents/{id}/download`；客户 `/portal/document-links/{id}/download` |
 | 健康检查 | `/health/live`, `/health/ready` |
 
@@ -541,7 +568,7 @@ Content-Type: application/json
 Idempotency-Key: <run_id>:<turn>
 ```
 
-`purpose` 为 `CLASSIFY | REVIEW`。Backend 发送 `document_id`、`storage_key`、`content_type` 和 `sha256`；Agent 在只读卷读取文件。远端模型只接收 Base64 完整文件，不接收本地路径。
+`purpose` 为 `CLASSIFY | REVIEW`。Backend 发送 `document_id`、`storage_key`、`content_type` 和 `sha256`；Agent 在只读卷校验路径及哈希后读取文件。当前 Novita 路径先将每一页 PDF/图片送 OCR-2，再将识别文本送 Flash；Flash 不直接读取文件二进制或文件名。独立复用入口 `POST /v1/analyze-inline` 接收带 Base64 的同义任务，需要单独的 Agent API Key；将来由模型团队交付的 `REMOTE` 适配仍可使用完整文件传输，不能与现有 Novita 链路混为一谈。Agent 对外复用需另配认证和 HTTPS 网关，当前生产不公开其容器端口。
 
 严格字段、枚举和示例见 [AI Agent 接口与架构交接](./README_AI_Agent接口与架构交接.md)。
 
@@ -574,6 +601,7 @@ send(recipient: str, template: str, payload: dict) -> None
 
 /staff
   /profile
+  /notifications
   /collections
   /collections/new
   /collections/:id
@@ -585,6 +613,7 @@ send(recipient: str, template: str, payload: dict) -> None
 
 /client
   /profile
+  /notifications
   /collections
   /collections/:id
   /contacts
@@ -605,7 +634,9 @@ send(recipient: str, template: str, payload: dict) -> None
 - 使用业务动作名称，不让用户直接编辑状态；
 - 会计审核采用资料项、预览、决定三栏布局；
 - 活动记录统一放在请求详情，不在审核页重复一套；
+- 客户只看到经过后端过滤的公开进度，明确区分 AI 审核、转人工及最终人工确认；
 - 文件列表按轮次切换，客户备注按整轮展示；
+- 客户与会计的底部主操作栏固定于视口，使用不透明底色并为正文预留滚动空间；
 - 破坏性操作、豁免和最终批准使用 Dialog 确认；
 - 搜索即时生效，不要求额外 Apply；
 - 小屏布局减少表格列并改为信息卡，不强行压缩桌面表格；
@@ -640,6 +671,7 @@ app/api/collections.py     请求、资料项、列表和事件
 app/api/portal.py          客户上传、文件和提交
 app/api/classification.py  CLASSIFY run
 app/api/review.py          审核、审批和 REVIEW run 查询
+app/api/notifications.py   站内通知列表与已读操作
 app/worker.py              文件安全处理和任务轮询
 app/review_analysis.py     REVIEW 编排、搜索和自动决定
 app/models.py              业务数据模型与数据库约束
@@ -682,7 +714,7 @@ app/models.py              业务数据模型与数据库约束
 | --- | --- |
 | `OFF` | 不创建提交后 REVIEW run |
 | `SUGGEST` | 保存并展示分析，始终由会计决定 |
-| `AUTO_REVIEW` | Agent 按请求审核偏好建议动作，Backend 校验后可自动满足或退回单项 |
+| `AUTO_REVIEW` | Agent 按请求审核偏好建议动作，Backend 校验后可自动满足或退回单项；整轮全通过后仍等待会计确认 |
 
 新请求默认 `AUTO_REVIEW + STANDARD`。`review_preference` 可选 `CAUTIOUS | STANDARD | EFFICIENT`，指导模型在“明确补交”与“转会计审核”之间分流，不改变事实判断、证据要求或人工整单批准。旧阈值字段只作历史兼容，不再控制自动决定。
 
@@ -714,21 +746,21 @@ REVIEW finding 不包含模型自报的 `confidence`；旧审核记录的该字�
 - 转人工原因；
 - AI 自动决定标识。
 
-人工决定会追加新记录并成为当前结论，AI 和旧人工记录继续保留。客户侧只显示公开状态和 `client_message`，不返回模型原始输出、置信度、内部备注和搜索轨迹。
+人工决定会追加新记录并成为当前结论，AI 和旧人工记录继续保留。客户侧只显示公开状态和 `client_message`，不返回模型原始输出、REVIEW 置信度、内部备注和搜索轨迹。AI 自动退回后，客户可请求人工复审并原样再提交，本轮跳过 AI；此选择和复审结果同样留痕。
 
 ### 16.5 当前上线状态
 
-Agent 容器和接口已经部署，`/health/live` 正常。因为没有正式模型接口，生产环境：
+生产环境已经部署独立 Agent，分类与审核均走 Novita 提供的 OCR-2 和 V4.1 Flash：
 
 ```text
-AGENT_CLASSIFICATION_PROVIDER=DISABLED
-AGENT_REVIEW_PROVIDER=DISABLED
-MODEL_API_URL=
-MODEL_HEALTH_URL=
-MODEL_API_KEY=
+AGENT_CLASSIFICATION_PROVIDER=DEEPSEEK
+AGENT_REVIEW_PROVIDER=DEEPSEEK
+OCR_MODEL=deepseek/deepseek-ocr-2
+MODEL_NAME=deepseek/deepseek-v4.1-flash
+MODEL_REQUEST_TIMEOUT_SECONDS=300
 ```
 
-因此当前线上可完整使用人工流程，但不能把开发环境的固定 Mock 案例视为真实 AI 能力。
+Novita 密钥仅保存在服务器环境文件，不写入文档、镜像或日志。REVIEW 请求启用低强度 reasoning；`CLASSIFY` 不启用。Agent 为 PDF 逐页/图片逐张 OCR，模型分析仅见 OCR 文本及受控业务上下文。Agent 记录各阶段结构化日志，保证不泄漏文件正文或密钥。已经用部分真实调用验证链路，但不能把抽样案例等同于全量准确率或财务质量验收。
 
 ## 17. 安全与隐私设计
 
@@ -740,7 +772,7 @@ MODEL_API_KEY=
 - refresh token 轮换并检测重放；
 - 修改密码和登出会撤销相应会话；
 - 登录、邀请和密码重置接口限流；
-- 生产 HTTPS 下必须启用 `Secure` Cookie。
+- 生产 HTTPS 已启用 `Secure` Cookie。
 
 ### 17.2 租户与授权
 
@@ -772,7 +804,7 @@ MODEL_API_KEY=
 
 ### 17.5 当前安全缺口
 
-演示环境仍使用 HTTP 和公网 IP，不适合承载真实客户财务资料。正式上线前必须至少完成域名和 TLS、`COOKIE_SECURE=true`、备份加密、最小化 SSH 来源、集中日志、漏洞扫描和权限复核。
+域名、TLS 和 `COOKIE_SECURE=true` 已部署。剩余风险主要是备份加密与恢复演练、SSH 来源维护、集中日志、漏洞扫描、模型输出质量监测和权限复核；现有 HTTPS 不能替代这些生产保障。
 
 ## 18. 部署与发布设计
 
@@ -820,24 +852,24 @@ GitHub Actions 负责测试、构建和推送 ECR，不直接 SSH 生产服务�
 | 项目 | 当前值 |
 | --- | --- |
 | 主机 | AWS Lightsail Ubuntu，Singapore `ap-southeast-1` |
-| 入口 | `http://13.213.135.223` |
-| 对外端口 | 80；22 仅固定 CIDR 和 `lightsail-connect` |
+| 入口 | `https://folio.sarl`（Cloudflare 代理，源站 TLS） |
+| 对外端口 | 80/443；SSH 22 按来源白名单管理 |
 | Compose 服务 | nginx、frontend、backend、worker、agent、postgres、redis、clamav |
-| 数据库 revision | `0010_classification_confirmation` |
-| Frontend image | `d63d19889fa5fbf1bc1d7f6ae73a465aac019f1f` |
-| Backend image | `49c5db2c94ab71d151ee983c2c6ad9d9a83b07e4` |
-| Agent runtime image | `94314111e1d01d3b1451e258bbc862c3a3519813` |
+| 数据库 revision | `0016_manual_review_request` |
+| Frontend image | `b9ec9d2e2ce3227ffb8b351a888e4605a35c3151` |
+| Backend image | `f9b3114a66c38a7dd5ac5ec95430ff039c1c43bb` |
+| Agent runtime image | `fac75993ee6a397f553c1c96c45c5351a59cdcab` |
 | Backend readiness | PostgreSQL、Redis 均为 `ok` |
-| Agent readiness | live 正常；真实模型未配置，因此 ready 为 `MODEL_NOT_CONFIGURED` |
+| Agent readiness | 生产配置 `DEEPSEEK` 分类与审核，Novita OCR/Flash 已联通；业务 API 的 ready 不依赖 Agent |
 
 ### 18.5 发布与回滚
 
 标准发布：
 
 ```bash
-docker compose --env-file .env.prod pull
-docker compose --env-file .env.prod run --rm migrate
-docker compose --env-file .env.prod up -d --remove-orphans
+docker compose --env-file .env.prod -f compose.yml -f compose.tls.yml pull
+docker compose --env-file .env.prod -f compose.yml -f compose.tls.yml run --rm migrate
+docker compose --env-file .env.prod -f compose.yml -f compose.tls.yml up -d
 ```
 
 应用回滚通过恢复 `.env.prod` 中上一组不可变镜像 SHA 并重新启动完成。数据库迁移回滚不能仅依赖应用镜像；破坏性迁移前必须备份，并优先使用向后兼容的扩展迁移。
@@ -868,12 +900,12 @@ Backend readiness 不依赖 Agent，从而保证模型故障时人工业务仍�
 
 ### 19.3 正式生产建议
 
-以下属于正式上线前必须完成的运维项：
+证书和续期任务已部署，但还需验证续期告警。以下是进一步生产化所需的运维项：
 
 - PostgreSQL 每日备份和定期恢复演练；
 - documents 卷加密快照和异地备份；
 - 磁盘容量、API 错误、Worker 积压、AI 连续失败和备份失败告警；
-- 证书自动续期；
+- 定期验证证书续期及 Cloudflare 到源站的严格 TLS；
 - 明确并批准 RPO/RTO。建议初始目标为 RPO 24 小时、RTO 4 小时，但这不是当前已验证承诺；
 - 制定财务资料保留期限和客户删除请求处理规则。
 
@@ -890,7 +922,9 @@ Backend readiness 不依赖 Agent，从而保证模型故障时人工业务仍�
 | REVIEW 搜索 | 最多 3 轮 |
 | 单轮搜索追加 | 最多 20 个文件，并受 100 文件总量限制 |
 | 模型连接超时 | 默认 10 秒 |
-| 模型单轮推理超时 | 默认 180 秒 |
+| 模型请求超时 | Agent 当前配置 300 秒；REVIEW 总预算约 290 秒，CLASSIFY 约 150 秒 |
+| OCR 页数与图像 | PDF 最多 20 页；单张图片最多 16 MP |
+| OCR 文本 | 单次分析最多 120,000 字符 |
 
 ### 20.2 扩展路径
 
@@ -913,9 +947,9 @@ Backend readiness 不依赖 Agent，从而保证模型故障时人工业务仍�
 
 | 子系统 | 结果 | 覆盖重点 |
 | --- | --- | --- |
-| Frontend | 49 tests passed；ESLint、类型检查和 production build 通过 | 路由、认证、字段转换、账户、列表、Portal、审核和 AI 展示 |
-| Backend | 发布基线 56 tests passed | JWT、租户隔离、并发、文件、提交、审核、搜索、自动决定和 Outbox |
-| Agent | 33 tests passed | 文件边界、分类、审核 schema、幂等、远端错误、金额和搜索动作 |
+| Frontend | CI 执行 ESLint、类型检查、单测和 production build | 路由、认证、字段转换、账户、Portal、审核、通知和 AI 展示 |
+| Backend | CI 执行单测和迁移相关检查 | JWT、租户隔离、文件、人工复审、提交、搜索、自动决定和通知 |
+| Agent | 单测覆盖协议、文件边界、OCR、模型响应和幂等 | 分类、审核 schema、远端错误、金额和搜索动作 |
 
 Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数据库名 `acc_test` 和 Redis DB 15，防止误删开发或生产数据。
 
@@ -936,6 +970,8 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 13. 重复提交、Worker 重试和迟到结果不产生重复决定；
 14. 客户 API 不返回内部备注、storage key、AI 原始输出和搜索轨迹；
 15. Agent 停止后人工闭环仍可完成。
+16. AI 自动退回后客户可不修改文件直接请求人工复审；该轮跳过 AI，最终由会计决定。
+17. 站内通知出现于状态更新后，客户公开时间线不泄漏内部审核与模型轨迹。
 
 ### 21.3 尚未完成的质量验证
 
@@ -944,7 +980,7 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 - 独立渗透测试、依赖漏洞门禁和恶意文件专项测试；
 - 备份恢复、主机故障和磁盘耗尽演练；
 - Email/飞书真实渠道验收；
-- HTTPS 正式环境验收。
+- TLS 证书续期与故障切换演练。
 
 ## 22. 风险与应对
 
@@ -954,8 +990,8 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 | 模型不可用 | AI 分类/审核延迟 | Provider 可关闭，人工流程独立 | 模型 SLA、超时监控和降级告警 |
 | 单机故障 | 整体服务暂时不可用 | 持久卷、不可变镜像 | 托管数据库、对象存储、备份恢复 |
 | 本地文件丢失 | 财务资料不可恢复 | 命名卷 | 加密快照、异地备份和恢复演练 |
-| HTTP 演示入口 | 财务资料传输风险 | 仅作为演示环境 | 正式域名、TLS 和 Secure Cookie |
-| 通知未投递 | 客户不能及时得知补交 | 页面状态为权威、Outbox 可追踪 | 接入 SES/飞书并监控失败 |
+| TLS 或证书异常 | 域名不可用或源站连接失败 | HTTPS、严格 TLS、安全 Cookie、续期任务 | 续期告警与故障演练 |
+| 外部通知未投递 | 客户不能从邮件/飞书及时得知补交 | 页面状态与站内通知可用，Outbox 可追踪 | 接入 SES/飞书并监控失败 |
 | 多租户越权 | 严重数据泄漏 | 后端授权、复合外键、隔离测试 | 安全审计和定期权限回归 |
 | 长耗时文件/模型 | Worker 积压 | 租约、超时、有限重试 | 指标告警、Worker 扩容、容量规划 |
 | 财务数据保留不明确 | 合规与存储风险 | 不自动物理删除历史 | 与业务方确定留存和删除政策 |
@@ -985,8 +1021,8 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 - `acc-system-backend`：FastAPI、Worker、Alembic、Dockerfile、Compose、Nginx 和 ECR Action；
 - `acc-system-agent`：Agent 服务、严格协议、Dockerfile 和 ECR Action；
 - AWS ECR：前端、后端、Nginx、Agent 镜像；
-- AWS Lightsail：Compose 演示环境；
-- PostgreSQL revision：`0010_classification_confirmation`。
+- AWS Lightsail：`folio.sarl` HTTPS Compose 环境；
+- PostgreSQL revision：`0016_manual_review_request`。
 
 ### 24.2 文档
 
@@ -1002,7 +1038,7 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 
 本次交付已经形成可运行的会计资料收集闭环：事务所管理账户和客户，会计创建请求，客户上传并多轮补交，会计或受控 AI 审核单项，最终由会计确认整单。系统通过清晰状态机、租户隔离、显式 evidence、不可变审计记录和人工最终批准，保证自动化不会绕过业务责任边界。
 
-当前最重要的后续工作不是继续增加页面，而是完成正式模型联调、HTTPS、备份恢复、监控告警和真实业务试运行。完成这些生产化工作后，系统才适合承载真实客户财务资料并用实际指标评估业务收益。
+目前真实 OCR/Flash 链路与 HTTPS 已运行；下一步重点是全量业务案例评估、误判复核、备份恢复、监控告警和真实业务试运行。生产可用性不能仅由模型接口打通或抽样 case 通过来证明。
 
 ## 附录 A：核心术语
 
@@ -1015,14 +1051,15 @@ Backend 集成测试有主动安全保护：只允许 `ENVIRONMENT=test`、数�
 | Evidence | 审核决定引用的文件及 `SUPPORTS/CONTRADICTS/REFERENCE` 关系 |
 | Review Decision | 对一个资料项的 `SATISFY/REQUEST_ACTION/WAIVE` 决定 |
 | AI Run | 一次 CLASSIFY 或 REVIEW 异步分析任务 |
-| Outbox | 与业务事务同时创建、等待外部渠道消费的通知记录 |
+| Notification | 用户可在系统内查看、标记已读的站内通知 |
+| Outbox | 与业务事务同时创建、留待外部渠道消费的通知记录；目前外部投递受抑制 |
 | READY_FOR_BOOKKEEPING | 所有必交项完成并由会计人工确认后的整单状态，界面显示“已确认” |
 
 ## 附录 B：版本基线
 
 | 仓库 | 交付基线 |
 | --- | --- |
-| Frontend | `d63d198` |
-| Backend | `49c5db2` |
-| Agent runtime | `9431411`；后续 `839263e` 仅更新说明文字 |
-| Docs | 本文生成前基线 `b6bfe0a` |
+| Frontend | `b9ec9d2` |
+| Backend | `f9b3114` |
+| Agent runtime | `fac7599` |
+| Docs | 本文为基于以上运行版本的更新稿 |

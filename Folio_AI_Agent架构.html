@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Folio AI Agent 架构</title>
+<style>html,body{margin:0;background:#fff}body{min-height:100vh;display:grid;place-items:center}body>svg{width:100%;height:auto;display:block;max-width:1900px}text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif}@media print{@page{size:A3 landscape;margin:8mm}}</style>
+</head>
+<body>
+<!-- Embedded vector diagram. Edge routing: Graphviz. Technology logos: Simple Icons. No network requests. -->
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="diagram-title diagram-description" width="1587" height="1071" viewBox="0 0 1587 1071"><title id="diagram-title">Folio AI Agent 架构</title><desc id="diagram-description">独立 FastAPI 分析服务接受文件引用或带 API Key 的 Base64 请求。所有 PDF 和图片先经 Novita DeepSeek OCR，再以 OCR 文本和受控上下文调用 Flash；Agent 校验结构化响应，Backend 执行搜索与业务决定。Agent 不连接 PostgreSQL 或 Redis。</desc><defs><symbol id="i-fastapi" viewBox="0 0 24 24"><path d="M12 .0387C5.3729.0384.0003 5.3931 0 11.9988c-.001 6.6066 5.372 11.9628 12 11.9625 6.628.0003 12.001-5.3559 12-11.9625-.0003-6.6057-5.3729-11.9604-12-11.96m-.829 5.4153h7.55l-7.5805 5.3284h5.1828L5.279 18.5436q2.9466-6.5444 5.892-13.0896"/></symbol>
+<symbol id="i-python" viewBox="0 0 24 24"><path d="M14.25.18l.9.2.73.26.59.3.45.32.34.34.25.34.16.33.1.3.04.26.02.2-.01.13V8.5l-.05.63-.13.55-.21.46-.26.38-.3.31-.33.25-.35.19-.35.14-.33.1-.3.07-.26.04-.21.02H8.77l-.69.05-.59.14-.5.22-.41.27-.33.32-.27.35-.2.36-.15.37-.1.35-.07.32-.04.27-.02.21v3.06H3.17l-.21-.03-.28-.07-.32-.12-.35-.18-.36-.26-.36-.36-.35-.46-.32-.59-.28-.73-.21-.88-.14-1.05-.05-1.23.06-1.22.16-1.04.24-.87.32-.71.36-.57.4-.44.42-.33.42-.24.4-.16.36-.1.32-.05.24-.01h.16l.06.01h8.16v-.83H6.18l-.01-2.75-.02-.37.05-.34.11-.31.17-.28.25-.26.31-.23.38-.2.44-.18.51-.15.58-.12.64-.1.71-.06.77-.04.84-.02 1.27.05zm-6.3 1.98l-.23.33-.08.41.08.41.23.34.33.22.41.09.41-.09.33-.22.23-.34.08-.41-.08-.41-.23-.33-.33-.22-.41-.09-.41.09zm13.09 3.95l.28.06.32.12.35.18.36.27.36.35.35.47.32.59.28.73.21.88.14 1.04.05 1.23-.06 1.23-.16 1.04-.24.86-.32.71-.36.57-.4.45-.42.33-.42.24-.4.16-.36.09-.32.05-.24.02-.16-.01h-8.22v.82h5.84l.01 2.76.02.36-.05.34-.11.31-.17.29-.25.25-.31.24-.38.2-.44.17-.51.15-.58.13-.64.09-.71.07-.77.04-.84.01-1.27-.04-1.07-.14-.9-.2-.73-.25-.59-.3-.45-.33-.34-.34-.25-.34-.16-.33-.1-.3-.04-.25-.02-.2.01-.13v-5.34l.05-.64.13-.54.21-.46.26-.38.3-.32.33-.24.35-.2.35-.14.33-.1.3-.06.26-.04.21-.02.13-.01h5.84l.69-.05.59-.14.5-.21.41-.28.33-.32.27-.35.2-.36.15-.36.1-.35.07-.32.04-.28.02-.21V6.07h2.09l.14.01zm-6.47 14.25l-.23.33-.08.41.08.41.23.33.33.23.41.08.41-.08.33-.23.23-.33.08-.41-.08-.41-.23-.33-.33-.23-.41-.08-.41.08z"/></symbol>
+<symbol id="i-deepseek" viewBox="0 0 24 24"><path d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287.3.3 0 0 1 .113.074.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078.253.253 0 0 1-.114-.358 1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.392.451.462.576.685.915.176.264.336.536.446.848.066.194-.02.353-.25.45"/></symbol></defs><rect width="100%" height="100%" fill="white"/><g transform="translate(30 23)"><rect width="38" height="38" rx="10" fill="#163D32"/><g transform="translate(3 3)" fill="#F5F3EB"><path d="M8 8a2 2 0 0 1 2-2h2v17l-4 3V8Z"/><path d="M14 6h12l-3.4 4.2a2 2 0 0 1-1.6.8h-7V6Z"/><path d="M14 14h9l-3.4 4.2a2 2 0 0 1-1.6.8h-4v-5Z" opacity=".7"/></g></g><text x="82" y="51" font-size="25" font-weight="bold" fill="#233A2D">Folio AI Agent 架构</text><g transform="translate(28 80)"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(68.4 898.4)"><g><rect x="-20" y="-874" width="324" height="454" rx="9" stroke="#CCD6DE" stroke-width="1.2" fill="#F8FAFC"/><text x="-6" y="-849" font-size="14" font-weight="600" fill="#344054">输入适配 · 两个 API 入口</text></g><g><rect x="344" y="-770" width="706" height="796" rx="9" stroke="#859DAE" stroke-width="1.2" fill="#FFFFFF"/><text x="358" y="-745" font-size="14" font-weight="600" fill="#344054">agent 容器 · 独立 FastAPI 服务，不连接 PostgreSQL / Redis，不修改业务状态</text></g><g><rect x="1090" y="-754" width="324" height="494" rx="9" stroke="#ACB6CE" stroke-width="1.2" fill="#F8F9FD"/><text x="1104" y="-729" font-size="14" font-weight="600" fill="#344054">外部模型服务 · Novita API</text></g><g><rect x="-20" y="-194" width="324" height="214" rx="9" stroke="#ACBCB2" stroke-width="1.2" fill="#FAFCFA"/><text x="-6" y="-169" font-size="14" font-weight="600" fill="#344054">状态与搜索留在 Backend</text></g>
+<title>Architecture</title>
+<!-- backend -->
+<g id="node1" class="node">
+<title>backend</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M272,-830C272,-830 12,-830 12,-830 6,-830 0,-824 0,-818 0,-818 0,-692 0,-692 0,-686 6,-680 12,-680 12,-680 272,-680 272,-680 278,-680 284,-686 284,-692 284,-692 284,-818 284,-818 284,-824 278,-830 272,-830"/>
+<text text-anchor="middle" x="142" y="-779.5" font-size="17" font-weight="600" fill="#263A30">Folio Backend Worker</text><text text-anchor="middle" x="142" y="-756.5" font-size="12" fill="#64716B">POST /v1/analyze</text><text text-anchor="middle" x="142" y="-736.5" font-size="12" fill="#64716B">document_id / storage_key / SHA-256</text><text text-anchor="middle" x="142" y="-716.5" font-size="12" fill="#64716B">已安全扫描的 documents 只读卷</text></g>
+<!-- entry -->
+<g id="node3" class="node">
+<title>entry</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M642,-710C642,-710 382,-710 382,-710 376,-710 370,-704 370,-698 370,-698 370,-572 370,-572 370,-566 376,-560 382,-560 382,-560 642,-560 642,-560 648,-560 654,-566 654,-572 654,-572 654,-698 654,-698 654,-704 648,-710 642,-710"/>
+<use href="#i-fastapi" x="486" y="-697" width="22" height="22" fill="#009688"/><use href="#i-python" x="516" y="-697" width="22" height="22" fill="#3776AB"/><text text-anchor="middle" x="512" y="-653" font-size="17" font-weight="600" fill="#263A30">统一分析入口</text><text text-anchor="middle" x="512" y="-630" font-size="12" fill="#64716B">FastAPI · CLASSIFY / REVIEW</text><text text-anchor="middle" x="512" y="-610" font-size="12" fill="#64716B">schema_version · run_id · 幂等键</text><text text-anchor="middle" x="512" y="-590" font-size="12" fill="#64716B">两种文件输入汇入同一分析链路</text></g>
+<!-- backend&#45;&gt;entry -->
+<g id="edge1" class="edge">
+<title>backend&#45;&gt;entry</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M284.52,-695C284.52,-695 361.08,-695 361.08,-695"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="361.08,-697.28 367.58,-695 361.08,-692.73 361.08,-697.28"/>
+</g>
+<!-- inline -->
+<g id="node2" class="node">
+<title>inline</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M272,-590C272,-590 12,-590 12,-590 6,-590 0,-584 0,-578 0,-578 0,-452 0,-452 0,-446 6,-440 12,-440 12,-440 272,-440 272,-440 278,-440 284,-446 284,-452 284,-452 284,-578 284,-578 284,-584 278,-590 272,-590"/>
+<text text-anchor="middle" x="142" y="-539.5" font-size="17" font-weight="600" fill="#263A30">独立复用调用方</text><text text-anchor="middle" x="142" y="-516.5" font-size="12" fill="#64716B">POST /v1/analyze-inline</text><text text-anchor="middle" x="142" y="-496.5" font-size="12" fill="#64716B">完整文件 Base64 · Bearer API Key</text><text text-anchor="middle" x="142" y="-476.5" font-size="12" fill="#64716B">相同 snake_case 请求 / 响应协议</text></g>
+<!-- inline&#45;&gt;entry -->
+<g id="edge2" class="edge">
+<title>inline&#45;&gt;entry</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M284.52,-575C284.52,-575 361.08,-575 361.08,-575"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="361.08,-577.28 367.58,-575 361.08,-572.73 361.08,-577.28"/>
+</g>
+<!-- prepare -->
+<g id="node4" class="node">
+<title>prepare</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M1012,-710C1012,-710 752,-710 752,-710 746,-710 740,-704 740,-698 740,-698 740,-572 740,-572 740,-566 746,-560 752,-560 752,-560 1012,-560 1012,-560 1018,-560 1024,-566 1024,-572 1024,-572 1024,-698 1024,-698 1024,-704 1018,-710 1012,-710"/>
+<text text-anchor="middle" x="882" y="-659.5" font-size="17" font-weight="600" fill="#263A30">文件校验与 OCR 准备</text><text text-anchor="middle" x="882" y="-636.5" font-size="12" fill="#64716B">路径 / 符号链接 · MIME · SHA-256</text><text text-anchor="middle" x="882" y="-616.5" font-size="12" fill="#64716B">PDF 全部页面渲染 · 图片解码</text><text text-anchor="middle" x="882" y="-596.5" font-size="12" fill="#64716B">限制文件 / 页数 / 像素 / 文本总量</text></g>
+<!-- entry&#45;&gt;prepare -->
+<g id="edge3" class="edge">
+<title>entry&#45;&gt;prepare</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M654.52,-635C654.52,-635 731.08,-635 731.08,-635"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="731.08,-637.28 737.58,-635 731.08,-632.73 731.08,-637.28"/>
+</g>
+<!-- ocr -->
+<g id="node5" class="node">
+<title>ocr</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M1382,-710C1382,-710 1122,-710 1122,-710 1116,-710 1110,-704 1110,-698 1110,-698 1110,-572 1110,-572 1110,-566 1116,-560 1122,-560 1122,-560 1382,-560 1382,-560 1388,-560 1394,-566 1394,-572 1394,-572 1394,-698 1394,-698 1394,-704 1388,-710 1382,-710"/>
+<use href="#i-deepseek" x="1241" y="-697" width="22" height="22" fill="#4D6BFE"/><text text-anchor="middle" x="1252" y="-653" font-size="17" font-weight="600" fill="#263A30">DeepSeek-OCR-2</text><text text-anchor="middle" x="1252" y="-630" font-size="12" fill="#64716B">图片 / PDF 每页先执行 OCR</text><text text-anchor="middle" x="1252" y="-610" font-size="12" fill="#64716B">返回文本与表格内容</text><text text-anchor="middle" x="1252" y="-590" font-size="12" fill="#64716B">OCR 失败显式报错，不静默跳页</text></g>
+<!-- prepare&#45;&gt;ocr -->
+<g id="edge4" class="edge">
+<title>prepare&#45;&gt;ocr</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M1024.52,-660C1024.52,-660 1101.08,-660 1101.08,-660"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="1101.08,-662.28 1107.58,-660 1101.08,-657.73 1101.08,-662.28"/>
+<text xml:space="preserve" text-anchor="middle" x="1053.63" y="-663.3" font-family="Arial" font-size="11.00" fill="#52645a">图像</text>
+</g>
+<!-- policy -->
+<g id="node6" class="node">
+<title>policy</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M1012,-430C1012,-430 752,-430 752,-430 746,-430 740,-424 740,-418 740,-418 740,-292 740,-292 740,-286 746,-280 752,-280 752,-280 1012,-280 1012,-280 1018,-280 1024,-286 1024,-292 1024,-292 1024,-418 1024,-418 1024,-424 1018,-430 1012,-430"/>
+<text text-anchor="middle" x="882" y="-379.5" font-size="17" font-weight="600" fill="#263A30">上下文与两阶段策略</text><text text-anchor="middle" x="882" y="-356.5" font-size="12" fill="#64716B">上传 CLASSIFY：仅归类，无 thinking</text><text text-anchor="middle" x="882" y="-336.5" font-size="12" fill="#64716B">提交 REVIEW：完整审核，thinking=low</text><text text-anchor="middle" x="882" y="-316.5" font-size="12" fill="#64716B">公司 / 期间 / 资料项 / 轮次 / 偏好</text></g>
+<!-- ocr&#45;&gt;policy -->
+<g id="edge5" class="edge">
+<title>ocr&#45;&gt;policy</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M1109.44,-610C1084.84,-610 1067,-610 1067,-610 1067,-610 1067,-380 1067,-380 1067,-380 1033.02,-380 1033.02,-380"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="1033.02,-377.73 1026.52,-380 1033.02,-382.28 1033.02,-377.73"/>
+<text xml:space="preserve" text-anchor="middle" x="1044.08" y="-502.53" font-family="Arial" font-size="11.00" fill="#52645a">OCR 文本</text>
+</g>
+<!-- flash -->
+<g id="node7" class="node">
+<title>flash</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M1382,-430C1382,-430 1122,-430 1122,-430 1116,-430 1110,-424 1110,-418 1110,-418 1110,-292 1110,-292 1110,-286 1116,-280 1122,-280 1122,-280 1382,-280 1382,-280 1388,-280 1394,-286 1394,-292 1394,-292 1394,-418 1394,-418 1394,-424 1388,-430 1382,-430"/>
+<use href="#i-deepseek" x="1241" y="-417" width="22" height="22" fill="#4D6BFE"/><text text-anchor="middle" x="1252" y="-373" font-size="17" font-weight="600" fill="#263A30">DeepSeek-V4.1-Flash</text><text text-anchor="middle" x="1252" y="-350" font-size="12" fill="#64716B">只接收 OCR 文本和受控上下文</text><text text-anchor="middle" x="1252" y="-330" font-size="12" fill="#64716B">不收二进制 · REVIEW 隐去文件名</text><text text-anchor="middle" x="1252" y="-310" font-size="12" fill="#64716B">模型名由服务配置固定</text></g>
+<!-- policy&#45;&gt;flash -->
+<g id="edge6" class="edge">
+<title>policy&#45;&gt;flash</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M1024.52,-330C1024.52,-330 1101.08,-330 1101.08,-330"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="1101.08,-332.28 1107.58,-330 1101.08,-327.73 1101.08,-332.28"/>
+<text xml:space="preserve" text-anchor="middle" x="1053.63" y="-333.3" font-family="Arial" font-size="11.00" fill="#52645a">推理</text>
+</g>
+<!-- validation -->
+<g id="node9" class="node">
+<title>validation</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M1012,-150C1012,-150 752,-150 752,-150 746,-150 740,-144 740,-138 740,-138 740,-12 740,-12 740,-6 746,0 752,0 752,0 1012,0 1012,0 1018,0 1024,-6 1024,-12 1024,-12 1024,-138 1024,-138 1024,-144 1018,-150 1012,-150"/>
+<text text-anchor="middle" x="882" y="-99.5" font-size="17" font-weight="600" fill="#263A30">严格校验与有限纠正</text><text text-anchor="middle" x="882" y="-76.5" font-size="12" fill="#64716B">schema / 枚举 / ID / evidence</text><text text-anchor="middle" x="882" y="-56.5" font-size="12" fill="#64716B">Decimal 金额关系 · 输出完整性</text><text text-anchor="middle" x="882" y="-36.5" font-size="12" fill="#64716B">非法审核输出最多两次纠正</text></g>
+<!-- flash&#45;&gt;validation -->
+<g id="edge7" class="edge">
+<title>flash&#45;&gt;validation</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M1252,-279.6C1252,-196.67 1252,-75 1252,-75 1252,-75 1032.99,-75 1032.99,-75"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="1032.99,-72.73 1026.49,-75 1032.99,-77.28 1032.99,-72.73"/>
+<text xml:space="preserve" text-anchor="middle" x="1230.12" y="-78.3" font-family="Arial" font-size="11.00" fill="#52645a">JSON</text>
+</g>
+<!-- support -->
+<g id="node8" class="node">
+<title>support</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M642,-430C642,-430 382,-430 382,-430 376,-430 370,-424 370,-418 370,-418 370,-292 370,-292 370,-286 376,-280 382,-280 382,-280 642,-280 642,-280 648,-280 654,-286 654,-292 654,-292 654,-418 654,-418 654,-424 648,-430 642,-430"/>
+<text text-anchor="middle" x="512" y="-379.5" font-size="17" font-weight="600" fill="#263A30">运行保障 · 进程内</text><text text-anchor="middle" x="512" y="-356.5" font-size="12" fill="#64716B">OCR 哈希缓存 · 幂等响应缓存</text><text text-anchor="middle" x="512" y="-336.5" font-size="12" fill="#64716B">有限超时预算 · 各阶段 JSON 日志</text><text text-anchor="middle" x="512" y="-316.5" font-size="12" fill="#64716B">不记录文件正文、模型原文或密钥</text></g>
+<!-- output -->
+<g id="node10" class="node">
+<title>output</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M642,-150C642,-150 382,-150 382,-150 376,-150 370,-144 370,-138 370,-138 370,-12 370,-12 370,-6 376,0 382,0 382,0 642,0 642,0 648,0 654,-6 654,-12 654,-12 654,-138 654,-138 654,-144 648,-150 642,-150"/>
+<text text-anchor="middle" x="512" y="-99.5" font-size="17" font-weight="600" fill="#263A30">统一结构化结果</text><text text-anchor="middle" x="512" y="-76.5" font-size="12" fill="#64716B">CLASSIFY：类别 / 资料项 / 置信度</text><text text-anchor="middle" x="512" y="-56.5" font-size="12" fill="#64716B">REVIEW：extractions / findings / search</text><text text-anchor="middle" x="512" y="-36.5" font-size="12" fill="#64716B">审核不返回 confidence · 版本由配置写入</text></g>
+<!-- validation&#45;&gt;output -->
+<g id="edge8" class="edge">
+<title>validation&#45;&gt;output</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M739.48,-75C739.48,-75 662.92,-75 662.92,-75"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="662.92,-72.73 656.42,-75 662.92,-77.28 662.92,-72.73"/>
+</g>
+<!-- apply -->
+<g id="node11" class="node">
+<title>apply</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M272,-150C272,-150 12,-150 12,-150 6,-150 0,-144 0,-138 0,-138 0,-12 0,-12 0,-6 6,0 12,0 12,0 272,0 272,0 278,0 284,-6 284,-12 284,-12 284,-138 284,-138 284,-144 278,-150 272,-150"/>
+<text text-anchor="middle" x="142" y="-99.5" font-size="17" font-weight="600" fill="#263A30">调用方继续处理</text><text text-anchor="middle" x="142" y="-76.5" font-size="12" fill="#64716B">Backend 搜索补证后重新调用</text><text text-anchor="middle" x="142" y="-56.5" font-size="12" fill="#64716B">再校验归属 / 金额并执行单项决定</text><text text-anchor="middle" x="142" y="-36.5" font-size="12" fill="#64716B">豁免与整单确认仍由会计完成</text></g>
+<!-- output&#45;&gt;apply -->
+<g id="edge9" class="edge">
+<title>output&#45;&gt;apply</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M369.48,-75C369.48,-75 292.92,-75 292.92,-75"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="292.92,-72.73 286.42,-75 292.92,-77.28 292.92,-72.73"/>
+</g>
+</g>
+</g></svg>
+<script type="text/vnd.graphviz" id="architecture-source">digraph Architecture {
+graph [layout=neato, overlap=true, splines=ortho, bgcolor="transparent", pad=0.95, fontname="Arial"];
+node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#BCC8C1", penwidth=1.2, fixedsize=true, width=3.9444444444444446, height=2.0833333333333335, pin=true, label=""];
+edge [color="#6B7D72", penwidth=1.3, arrowsize=0.65, fontname="Arial", fontsize=11, fontcolor="#52645A"];
+backend [pos="0,0!"];
+inline [pos="0,-3.3333333333333335!"];
+entry [pos="5.138888888888889,-1.6666666666666667!"];
+prepare [pos="10.277777777777779,-1.6666666666666667!"];
+ocr [pos="15.416666666666666,-1.6666666666666667!"];
+policy [pos="10.277777777777779,-5.555555555555555!"];
+flash [pos="15.416666666666666,-5.555555555555555!"];
+support [pos="5.138888888888889,-5.555555555555555!"];
+validation [pos="10.277777777777779,-9.444444444444445!"];
+output [pos="5.138888888888889,-9.444444444444445!"];
+apply [pos="0,-9.444444444444445!"];
+backend -> entry [];
+inline -> entry [];
+entry -> prepare [];
+prepare -> ocr [xlabel="图像"];
+ocr -> policy [xlabel="OCR 文本"];
+policy -> flash [xlabel="推理"];
+flash -> validation [xlabel="JSON"];
+validation -> output [];
+output -> apply [];
+}</script>
+</body>
+</html>

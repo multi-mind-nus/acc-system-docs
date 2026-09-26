@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Folio 前端架构</title>
+<style>html,body{margin:0;background:#fff}body{min-height:100vh;display:grid;place-items:center}body>svg{width:100%;height:auto;display:block;max-width:1900px}text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif}@media print{@page{size:A3 landscape;margin:8mm}}</style>
+</head>
+<body>
+<!-- Embedded vector diagram. Edge routing: Graphviz. Technology logos: Simple Icons. No network requests. -->
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="diagram-title diagram-description" width="1513" height="1145" viewBox="0 0 1513 1145"><title id="diagram-title">Folio 前端架构</title><desc id="diagram-description">一个 Vue SPA，包含会计和客户工作区。路由守卫、共享界面与会话状态支持业务页面；所有业务请求经统一 Axios 客户端访问 Backend。前端容器只提供构建后的静态文件。</desc><defs><symbol id="i-vuedotjs" viewBox="0 0 24 24"><path d="M24,1.61H14.06L12,5.16,9.94,1.61H0L12,22.39ZM12,14.08,5.16,2.23H9.59L12,6.41l2.41-4.18h4.43Z"/></symbol>
+<symbol id="i-typescript" viewBox="0 0 24 24"><path d="M1.125 0C.502 0 0 .502 0 1.125v21.75C0 23.498.502 24 1.125 24h21.75c.623 0 1.125-.502 1.125-1.125V1.125C24 .502 23.498 0 22.875 0zm17.363 9.75c.612 0 1.154.037 1.627.111a6.38 6.38 0 0 1 1.306.34v2.458a3.95 3.95 0 0 0-.643-.361 5.093 5.093 0 0 0-.717-.26 5.453 5.453 0 0 0-1.426-.2c-.3 0-.573.028-.819.086a2.1 2.1 0 0 0-.623.242c-.17.104-.3.229-.393.374a.888.888 0 0 0-.14.49c0 .196.053.373.156.529.104.156.252.304.443.444s.423.276.696.41c.273.135.582.274.926.416.47.197.892.407 1.266.628.374.222.695.473.963.753.268.279.472.598.614.957.142.359.214.776.214 1.253 0 .657-.125 1.21-.373 1.656a3.033 3.033 0 0 1-1.012 1.085 4.38 4.38 0 0 1-1.487.596c-.566.12-1.163.18-1.79.18a9.916 9.916 0 0 1-1.84-.164 5.544 5.544 0 0 1-1.512-.493v-2.63a5.033 5.033 0 0 0 3.237 1.2c.333 0 .624-.03.872-.09.249-.06.456-.144.623-.25.166-.108.29-.234.373-.38a1.023 1.023 0 0 0-.074-1.089 2.12 2.12 0 0 0-.537-.5 5.597 5.597 0 0 0-.807-.444 27.72 27.72 0 0 0-1.007-.436c-.918-.383-1.602-.852-2.053-1.405-.45-.553-.676-1.222-.676-2.005 0-.614.123-1.141.369-1.582.246-.441.58-.804 1.004-1.089a4.494 4.494 0 0 1 1.47-.629 7.536 7.536 0 0 1 1.77-.201zm-15.113.188h9.563v2.166H9.506v9.646H6.789v-9.646H3.375z"/></symbol>
+<symbol id="i-fastapi" viewBox="0 0 24 24"><path d="M12 .0387C5.3729.0384.0003 5.3931 0 11.9988c-.001 6.6066 5.372 11.9628 12 11.9625 6.628.0003 12.001-5.3559 12-11.9625-.0003-6.6057-5.3729-11.9604-12-11.96m-.829 5.4153h7.55l-7.5805 5.3284h5.1828L5.279 18.5436q2.9466-6.5444 5.892-13.0896"/></symbol>
+<symbol id="i-vite" viewBox="0 0 24 24"><path d="M13.056 23.238a.57.57 0 0 1-1.02-.355v-5.202c0-.63-.512-1.143-1.144-1.143H5.148a.57.57 0 0 1-.464-.903l3.777-5.29c.54-.753 0-1.804-.93-1.804H.57a.574.574 0 0 1-.543-.746.6.6 0 0 1 .08-.157L5.008.78a.57.57 0 0 1 .467-.24h14.589a.57.57 0 0 1 .466.903l-3.778 5.29c-.54.755 0 1.806.93 1.806h5.745c.238 0 .424.138.513.322a.56.56 0 0 1-.063.603z"/></symbol>
+<symbol id="i-docker" viewBox="0 0 24 24"><path d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"/></symbol>
+<symbol id="i-nginx" viewBox="0 0 24 24"><path d="M12 0L1.605 6v12L12 24l10.395-6V6L12 0zm6 16.59c0 .705-.646 1.29-1.529 1.29-.631 0-1.351-.255-1.801-.81l-6-7.141v6.66c0 .721-.57 1.29-1.274 1.29H7.32c-.721 0-1.29-.6-1.29-1.29V7.41c0-.705.63-1.29 1.5-1.29.646 0 1.38.255 1.83.81l5.97 7.141V7.41c0-.721.6-1.29 1.29-1.29h.075c.72 0 1.29.6 1.29 1.29v9.18H18z"/></symbol></defs><rect width="100%" height="100%" fill="white"/><g transform="translate(30 23)"><rect width="38" height="38" rx="10" fill="#163D32"/><g transform="translate(3 3)" fill="#F5F3EB"><path d="M8 8a2 2 0 0 1 2-2h2v17l-4 3V8Z"/><path d="M14 6h12l-3.4 4.2a2 2 0 0 1-1.6.8h-7V6Z"/><path d="M14 14h9l-3.4 4.2a2 2 0 0 1-1.6.8h-4v-5Z" opacity=".7"/></g></g><text x="82" y="51" font-size="25" font-weight="bold" fill="#233A2D">Folio 前端架构</text><g transform="translate(28 80)"><g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(68.4 972.4)"><g><rect x="-30" y="-970" width="1030" height="730" rx="9" stroke="#859DAE" stroke-width="1.2" fill="#FFFFFF"/><text x="-16" y="-945" font-size="14" font-weight="600" fill="#344054">浏览器 · 单一 Vue SPA（框为内部模块，不是独立服务）</text></g><g><rect x="-14" y="-444" width="998" height="188" rx="9" stroke="#CCD6DE" stroke-width="1.2" fill="#F8FAFC"/><text x="0" y="-419" font-size="14" font-weight="600" fill="#344054">共享能力 · 页面、路由与请求层共同使用</text></g><g><rect x="1032" y="-708" width="306" height="196" rx="9" stroke="#ACB6CE" stroke-width="1.2" fill="#F8F9FD"/><text x="1046" y="-683" font-size="14" font-weight="600" fill="#344054">外部服务</text></g><g><rect x="-24" y="-178" width="1368" height="202" rx="9" stroke="#ACBCB2" stroke-width="1.2" fill="#FAFCFA"/><text x="-10" y="-153" font-size="14" font-weight="600" fill="#344054">构建与运行 · frontend 容器负责静态托管，Vue 在浏览器中运行</text></g>
+<title>Architecture</title>
+<!-- shell -->
+<g id="node1" class="node">
+<title>shell</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M258,-904C258,-904 12,-904 12,-904 6,-904 0,-898 0,-892 0,-892 0,-782 0,-782 0,-776 6,-770 12,-770 12,-770 258,-770 258,-770 264,-770 270,-776 270,-782 270,-782 270,-892 270,-892 270,-898 264,-904 258,-904"/>
+<use href="#i-vuedotjs" x="109" y="-891" width="22" height="22" fill="#41B883"/><use href="#i-typescript" x="139" y="-891" width="22" height="22" fill="#3178C6"/><text text-anchor="middle" x="135" y="-847" font-size="17" font-weight="600" fill="#263A30">应用入口与布局</text><text text-anchor="middle" x="135" y="-824" font-size="12" fill="#64716B">Vue 3 · TypeScript</text><text text-anchor="middle" x="135" y="-804" font-size="12" fill="#64716B">main.ts / App.vue / AppShell</text></g>
+<!-- router -->
+<g id="node2" class="node">
+<title>router</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M258,-664C258,-664 12,-664 12,-664 6,-664 0,-658 0,-652 0,-652 0,-542 0,-542 0,-536 6,-530 12,-530 12,-530 258,-530 258,-530 264,-530 270,-536 270,-542 270,-542 270,-652 270,-652 270,-658 264,-664 258,-664"/>
+<text text-anchor="middle" x="135" y="-621.5" font-size="17" font-weight="600" fill="#263A30">路由与访问分区</text><text text-anchor="middle" x="135" y="-598.5" font-size="12" fill="#64716B">Vue Router · router.ts</text><text text-anchor="middle" x="135" y="-578.5" font-size="12" fill="#64716B">登录 / 会计 / 客户 · 角色守卫</text><text text-anchor="middle" x="135" y="-558.5" font-size="12" fill="#64716B">页面级懒加载 · 登录态恢复</text></g>
+<!-- shell&#45;&gt;router -->
+<g id="edge1" class="edge">
+<title>shell&#45;&gt;router</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M135,-769.51C135,-769.51 135,-672.87 135,-672.87"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="137.28,-672.87 135,-666.37 132.73,-672.87 137.28,-672.87"/>
+</g>
+<!-- staff -->
+<g id="node3" class="node">
+<title>staff</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M608,-904C608,-904 362,-904 362,-904 356,-904 350,-898 350,-892 350,-892 350,-782 350,-782 350,-776 356,-770 362,-770 362,-770 608,-770 608,-770 614,-770 620,-776 620,-782 620,-782 620,-892 620,-892 620,-898 614,-904 608,-904"/>
+<text text-anchor="middle" x="485" y="-861.5" font-size="17" font-weight="600" fill="#263A30">会计工作区 · /staff</text><text text-anchor="middle" x="485" y="-838.5" font-size="12" fill="#64716B">客户 / 员工 · 收集请求 · 通知</text><text text-anchor="middle" x="485" y="-818.5" font-size="12" fill="#64716B">资料审核 · AI 建议 · 人工决定</text><text text-anchor="middle" x="485" y="-798.5" font-size="12" fill="#64716B">筛选 / 分页 / 排序由 URL 保存</text></g>
+<!-- router&#45;&gt;staff -->
+<g id="edge2" class="edge">
+<title>router&#45;&gt;staff</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M270.29,-619C293.33,-619 310,-619 310,-619 310,-619 310,-837 310,-837 310,-837 341.24,-837 341.24,-837"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="341.24,-839.28 347.74,-837 341.24,-834.73 341.24,-839.28"/>
+</g>
+<!-- portal -->
+<g id="node4" class="node">
+<title>portal</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M608,-664C608,-664 362,-664 362,-664 356,-664 350,-658 350,-652 350,-652 350,-542 350,-542 350,-536 356,-530 362,-530 362,-530 608,-530 608,-530 614,-530 620,-536 620,-542 620,-542 620,-652 620,-652 620,-658 614,-664 608,-664"/>
+<text text-anchor="middle" x="485" y="-621.5" font-size="17" font-weight="600" fill="#263A30">客户工作区 · /client</text><text text-anchor="middle" x="485" y="-598.5" font-size="12" fill="#64716B">上传 / 分类 · 提交 / 补交</text><text text-anchor="middle" x="485" y="-578.5" font-size="12" fill="#64716B">申请人工复审 · 状态轮询</text><text text-anchor="middle" x="485" y="-558.5" font-size="12" fill="#64716B">公开时间线 · 通知 · 联系人</text></g>
+<!-- router&#45;&gt;portal -->
+<g id="edge3" class="edge">
+<title>router&#45;&gt;portal</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M270.57,-575C270.57,-575 341.18,-575 341.18,-575"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="341.18,-577.28 347.68,-575 341.18,-572.73 341.18,-577.28"/>
+</g>
+<!-- apis -->
+<g id="node5" class="node">
+<title>apis</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M958,-904C958,-904 712,-904 712,-904 706,-904 700,-898 700,-892 700,-892 700,-782 700,-782 700,-776 706,-770 712,-770 712,-770 958,-770 958,-770 964,-770 970,-776 970,-782 970,-782 970,-892 970,-892 970,-898 964,-904 958,-904"/>
+<text text-anchor="middle" x="835" y="-861.5" font-size="17" font-weight="600" fill="#263A30">业务 API 模块</text><text text-anchor="middle" x="835" y="-838.5" font-size="12" fill="#64716B">api/accounts · collections · review</text><text text-anchor="middle" x="835" y="-818.5" font-size="12" fill="#64716B">api/portal · notifications</text><text text-anchor="middle" x="835" y="-798.5" font-size="12" fill="#64716B">封装接口调用与 TypeScript 类型</text></g>
+<!-- staff&#45;&gt;apis -->
+<g id="edge4" class="edge">
+<title>staff&#45;&gt;apis</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M620.57,-859C620.57,-859 691.18,-859 691.18,-859"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="691.18,-861.28 697.68,-859 691.18,-856.73 691.18,-861.28"/>
+</g>
+<!-- portal&#45;&gt;apis -->
+<g id="edge5" class="edge">
+<title>portal&#45;&gt;apis</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M620.29,-597C643.33,-597 660,-597 660,-597 660,-597 660,-815 660,-815 660,-815 691.24,-815 691.24,-815"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="691.24,-817.28 697.74,-815 691.24,-812.73 691.24,-817.28"/>
+</g>
+<!-- http -->
+<g id="node6" class="node">
+<title>http</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M958,-664C958,-664 712,-664 712,-664 706,-664 700,-658 700,-652 700,-652 700,-542 700,-542 700,-536 706,-530 712,-530 712,-530 958,-530 958,-530 964,-530 970,-536 970,-542 970,-542 970,-652 970,-652 970,-658 964,-664 958,-664"/>
+<text text-anchor="middle" x="835" y="-621.5" font-size="17" font-weight="600" fill="#263A30">统一 HTTP 客户端</text><text text-anchor="middle" x="835" y="-598.5" font-size="12" fill="#64716B">Axios · axios-case-converter</text><text text-anchor="middle" x="835" y="-578.5" font-size="12" fill="#64716B">camelCase ↔ snake_case · Bearer</text><text text-anchor="middle" x="835" y="-558.5" font-size="12" fill="#64716B">401 合并刷新 · 单次请求重试</text></g>
+<!-- apis&#45;&gt;http -->
+<g id="edge6" class="edge">
+<title>apis&#45;&gt;http</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M835,-769.51C835,-769.51 835,-672.87 835,-672.87"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="837.28,-672.87 835,-666.37 832.73,-672.87 837.28,-672.87"/>
+</g>
+<!-- backend -->
+<g id="node7" class="node">
+<title>backend</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M1308,-664C1308,-664 1062,-664 1062,-664 1056,-664 1050,-658 1050,-652 1050,-652 1050,-542 1050,-542 1050,-536 1056,-530 1062,-530 1062,-530 1308,-530 1308,-530 1314,-530 1320,-536 1320,-542 1320,-542 1320,-652 1320,-652 1320,-658 1314,-664 1308,-664"/>
+<use href="#i-fastapi" x="1174" y="-651" width="22" height="22" fill="#009688"/><text text-anchor="middle" x="1185" y="-607" font-size="17" font-weight="600" fill="#263A30">Backend API</text><text text-anchor="middle" x="1185" y="-584" font-size="12" fill="#64716B">Nginx → /api/v1</text><text text-anchor="middle" x="1185" y="-564" font-size="12" fill="#64716B">权限校验与业务状态以服务端为准</text></g>
+<!-- http&#45;&gt;backend -->
+<g id="edge7" class="edge">
+<title>http&#45;&gt;backend</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M970.57,-597C970.57,-597 1041.18,-597 1041.18,-597"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="1041.18,-599.28 1047.68,-597 1041.18,-594.73 1041.18,-599.28"/>
+<text xml:space="preserve" text-anchor="middle" x="991.52" y="-600.3" font-family="Arial" font-size="11.00" fill="#52645a">HTTP</text>
+</g>
+<!-- ui -->
+<g id="node8" class="node">
+<title>ui</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M258,-404C258,-404 12,-404 12,-404 6,-404 0,-398 0,-392 0,-392 0,-282 0,-282 0,-276 6,-270 12,-270 12,-270 258,-270 258,-270 264,-270 270,-276 270,-282 270,-282 270,-392 270,-392 270,-398 264,-404 258,-404"/>
+<text text-anchor="middle" x="135" y="-361.5" font-size="17" font-weight="600" fill="#263A30">共享界面组件</text><text text-anchor="middle" x="135" y="-338.5" font-size="12" fill="#64716B">shadcn-vue / reka-ui · Tailwind</text><text text-anchor="middle" x="135" y="-318.5" font-size="12" fill="#64716B">表单 · Dialog · Calendar · Stepper</text><text text-anchor="middle" x="135" y="-298.5" font-size="12" fill="#64716B">文件预览 · 状态标识 · 操作栏</text></g>
+<!-- session -->
+<g id="node9" class="node">
+<title>session</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M608,-404C608,-404 362,-404 362,-404 356,-404 350,-398 350,-392 350,-392 350,-282 350,-282 350,-276 356,-270 362,-270 362,-270 608,-270 608,-270 614,-270 620,-276 620,-282 620,-282 620,-392 620,-392 620,-398 614,-404 608,-404"/>
+<text text-anchor="middle" x="485" y="-361.5" font-size="17" font-weight="600" fill="#263A30">会话与身份状态</text><text text-anchor="middle" x="485" y="-338.5" font-size="12" fill="#64716B">Pinia auth · 当前用户与角色</text><text text-anchor="middle" x="485" y="-318.5" font-size="12" fill="#64716B">Access Token 仅在内存中</text><text text-anchor="middle" x="485" y="-298.5" font-size="12" fill="#64716B">Refresh Token：HttpOnly Cookie</text></g>
+<!-- preferences -->
+<g id="node10" class="node">
+<title>preferences</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M958,-404C958,-404 712,-404 712,-404 706,-404 700,-398 700,-392 700,-392 700,-282 700,-282 700,-276 706,-270 712,-270 712,-270 958,-270 958,-270 964,-270 970,-276 970,-282 970,-282 970,-392 970,-392 970,-398 964,-404 958,-404"/>
+<text text-anchor="middle" x="835" y="-361.5" font-size="17" font-weight="600" fill="#263A30">外观与国际化</text><text text-anchor="middle" x="835" y="-338.5" font-size="12" fill="#64716B">Pinia appearance · Vue I18n</text><text text-anchor="middle" x="835" y="-318.5" font-size="12" fill="#64716B">默认英文 · 简体中文 · 深浅主题</text><text text-anchor="middle" x="835" y="-298.5" font-size="12" fill="#64716B">仅非敏感偏好写入本地存储</text></g>
+<!-- build -->
+<g id="node11" class="node">
+<title>build</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M258,-134C258,-134 12,-134 12,-134 6,-134 0,-128 0,-122 0,-122 0,-12 0,-12 0,-6 6,0 12,0 12,0 258,0 258,0 264,0 270,-6 270,-12 270,-12 270,-122 270,-122 270,-128 264,-134 258,-134"/>
+<use href="#i-vite" x="124" y="-121" width="22" height="22" fill="#646CFF"/><text text-anchor="middle" x="135" y="-77" font-size="17" font-weight="600" fill="#263A30">检查与构建</text><text text-anchor="middle" x="135" y="-54" font-size="12" fill="#64716B">ESLint · Vitest · vue-tsc</text><text text-anchor="middle" x="135" y="-34" font-size="12" fill="#64716B">Vite 生成生产静态资源</text></g>
+<!-- dist -->
+<g id="node12" class="node">
+<title>dist</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M608,-134C608,-134 362,-134 362,-134 356,-134 350,-128 350,-122 350,-122 350,-12 350,-12 350,-6 356,0 362,0 362,0 608,0 608,0 614,0 620,-6 620,-12 620,-12 620,-122 620,-122 620,-128 614,-134 608,-134"/>
+<text text-anchor="middle" x="485" y="-81" font-size="17" font-weight="600" fill="#263A30">构建产物 · dist</text><text text-anchor="middle" x="485" y="-58" font-size="12" fill="#64716B">HTML · JavaScript · CSS</text><text text-anchor="middle" x="485" y="-38" font-size="12" fill="#64716B">不包含服务器业务逻辑</text></g>
+<!-- build&#45;&gt;dist -->
+<g id="edge8" class="edge">
+<title>build&#45;&gt;dist</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M270.57,-67C270.57,-67 341.18,-67 341.18,-67"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="341.18,-69.28 347.68,-67 341.18,-64.73 341.18,-69.28"/>
+</g>
+<!-- container -->
+<g id="node13" class="node">
+<title>container</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M958,-134C958,-134 712,-134 712,-134 706,-134 700,-128 700,-122 700,-122 700,-12 700,-12 700,-6 706,0 712,0 712,0 958,0 958,0 964,0 970,-6 970,-12 970,-12 970,-122 970,-122 970,-128 964,-134 958,-134"/>
+<use href="#i-docker" x="824" y="-121" width="22" height="22" fill="#2496ED"/><text text-anchor="middle" x="835" y="-77" font-size="17" font-weight="600" fill="#263A30">前端容器 · frontend</text><text text-anchor="middle" x="835" y="-54" font-size="12" fill="#64716B">static-web-server</text><text text-anchor="middle" x="835" y="-34" font-size="12" fill="#64716B">静态资源 · SPA 路由回退</text></g>
+<!-- dist&#45;&gt;container -->
+<g id="edge9" class="edge">
+<title>dist&#45;&gt;container</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M620.57,-67C620.57,-67 691.18,-67 691.18,-67"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="691.18,-69.28 697.68,-67 691.18,-64.73 691.18,-69.28"/>
+</g>
+<!-- delivery -->
+<g id="node14" class="node">
+<title>delivery</title>
+<path fill="#ffffff" stroke="#bcc8c1" stroke-width="1.2" d="M1308,-134C1308,-134 1062,-134 1062,-134 1056,-134 1050,-128 1050,-122 1050,-122 1050,-12 1050,-12 1050,-6 1056,0 1062,0 1062,0 1308,0 1308,0 1314,0 1320,-6 1320,-12 1320,-12 1320,-122 1320,-122 1320,-128 1314,-134 1308,-134"/>
+<use href="#i-nginx" x="1174" y="-121" width="22" height="22" fill="#009639"/><text text-anchor="middle" x="1185" y="-77" font-size="17" font-weight="600" fill="#263A30">浏览器加载并执行</text><text text-anchor="middle" x="1185" y="-54" font-size="12" fill="#64716B">Nginx 分发页面与静态资源</text><text text-anchor="middle" x="1185" y="-34" font-size="12" fill="#64716B">后续 API 请求转发至 Backend</text></g>
+<!-- container&#45;&gt;delivery -->
+<g id="edge10" class="edge">
+<title>container&#45;&gt;delivery</title>
+<path fill="none" stroke="#6b7d72" stroke-width="1.3" d="M970.57,-67C970.57,-67 1041.18,-67 1041.18,-67"/>
+<polygon fill="#6b7d72" stroke="#6b7d72" stroke-width="1.3" points="1041.18,-69.28 1047.68,-67 1041.18,-64.73 1041.18,-69.28"/>
+</g>
+</g>
+</g></svg>
+<script type="text/vnd.graphviz" id="architecture-source">digraph Architecture {
+graph [layout=neato, overlap=true, splines=ortho, bgcolor="transparent", pad=0.95, fontname="Arial"];
+node [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#BCC8C1", penwidth=1.2, fixedsize=true, width=3.75, height=1.8611111111111112, pin=true, label=""];
+edge [color="#6B7D72", penwidth=1.3, arrowsize=0.65, fontname="Arial", fontsize=11, fontcolor="#52645A"];
+shell [pos="0,0!"];
+router [pos="0,-3.3333333333333335!"];
+staff [pos="4.861111111111111,0!"];
+portal [pos="4.861111111111111,-3.3333333333333335!"];
+apis [pos="9.722222222222221,0!"];
+http [pos="9.722222222222221,-3.3333333333333335!"];
+backend [pos="14.583333333333334,-3.3333333333333335!"];
+ui [pos="0,-6.944444444444445!"];
+session [pos="4.861111111111111,-6.944444444444445!"];
+preferences [pos="9.722222222222221,-6.944444444444445!"];
+build [pos="0,-10.694444444444445!"];
+dist [pos="4.861111111111111,-10.694444444444445!"];
+container [pos="9.722222222222221,-10.694444444444445!"];
+delivery [pos="14.583333333333334,-10.694444444444445!"];
+shell -> router [];
+router -> staff [];
+router -> portal [];
+staff -> apis [];
+portal -> apis [];
+apis -> http [];
+http -> backend [xlabel="HTTP"];
+build -> dist [];
+dist -> container [];
+container -> delivery [];
+}</script>
+</body>
+</html>
